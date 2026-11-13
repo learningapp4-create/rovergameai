@@ -54,14 +54,37 @@
   #banner.great { color: var(--amber); }
   #banner.fail { color: #ff8f8f; }
   .boot-error { padding: 12px; }
+  .group-label { margin: 8px 0 0; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); }
+  button.primary { background: var(--good); color: #06210c; border-color: var(--good); font-weight: 750; width: 100%; }
+  .brief { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 24px; background: rgba(2, 10, 6, 0.7); }
+  .brief[hidden] { display: none; }
+  .brief-card { width: min(440px, 100%); background: #062014; color: var(--ink); border: 1px solid var(--line); border-radius: 16px; padding: 22px 22px 18px; box-shadow: 0 20px 50px rgba(0,0,0,.5); }
+  .brief-card .kicker { margin: 0 0 4px; letter-spacing: 0.16em; font-size: 12px; color: var(--dim); }
+  .brief-card h2 { margin: 0 0 8px; font-size: 22px; }
+  .brief-card ol { margin: 0 0 16px; padding-left: 1.15em; }
+  .brief-card li { margin: 8px 0; }
+  .brief-card .primary { width: 100%; padding: 12px; }
 </style>
 </head>
 <body>
+<div id="brief" class="brief" role="dialog" aria-labelledby="brief-title">
+  <div class="brief-card">
+    <p class="kicker">Before you roll</p>
+    <h2 id="brief-title">Tool Ladder</h2>
+    <ol>
+      <li><b>Goal.</b> Scoop soil, then a mineral vein, then temperatures, then the ice core.</li>
+      <li><b>Move.</b> WASD drives. Click the map to cruise. The camera sees bright soil and dark dust.</li>
+      <li><b>Decide.</b> Each sample unlocks the next tool. The new tool is what makes the next target readable.</li>
+      <li><b>Score.</b> Soil, dust, and the vein pass 60%. Temperatures and the ice core are how you clear 90%.</li>
+    </ol>
+    <button id="begin" class="primary" type="button">Start the ladder</button>
+  </div>
+</div>
 <header>
   <a href="../index.html">All versions</a>
   <div><h1><span>TOOL</span> LADDER</h1><div style="color:#7dba8c;font-size:13px">An easy sample unlocks the next eye.</div></div>
   <div class="scorebox">
-    <div class="score-row"><span id="pct">0%</span><span>COMPLETION · PASS 60 · STRONG 90</span></div>
+    <div class="score-row"><span id="pct">0%</span><span>PASS 60 · STRONG 90</span></div>
     <div class="meter" id="meter"><div class="fill" id="fill"></div><i class="tick" style="left:60%"></i><i class="tick gold" style="left:90%"></i></div>
   </div>
 </header>
@@ -71,10 +94,9 @@
   <div class="tool" id="slot-thermal"><button id="m-thermal" disabled>3 Thermal probe</button><div>Locked until the vein is sampled.</div></div>
   <div class="tool" id="slot-drill"><button id="m-drill" disabled>4 Drill</button><div>Locked until two temperatures are logged.</div></div>
   <p id="status">Scoop the bright soil. That pays for the spectrometer.</p>
-  <p class="how">WASD drives. Click the map to cruise. Space uses the tool you have selected. F follows the rover’s pin — it starts off-target, then snaps closer after you pass near the real site. 210 seconds. R restarts.</p>
-  <div style="display:flex;gap:6px;flex-wrap:wrap">
-    <button id="follow">F Follow pin</button>
-    <button id="act">Space Use tool</button>
+  <button id="act" class="primary">Use tool</button>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+    <button id="follow">Follow pin</button>
     <button id="restart">Restart</button>
   </div>
   <div id="clock" style="margin-top:8px;color:#9dff6a">3:30</div>
@@ -90,6 +112,7 @@ catch (err) {
   throw err;
 }
 const $ = (id) => document.getElementById(id);
+let live = false;
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 function lerp(a, b, t) { return a + (b - a) * t; }
 function normAng(d) { while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return d; }
@@ -122,7 +145,14 @@ function makeNoise(rand) {
 }
 const rand = makeRand((Date.now() ^ Math.floor(Math.random() * 1e9)) >>> 0);
 const noise = makeNoise(rand);
-function heightAt(x, z) { return noise(x * 0.08, z * 0.08) * 0.8 + noise(x * 0.2, z * 0.2) * 0.2; }
+function heightAt(x, z) {
+  let h = noise(x * 0.08, z * 0.08) * 0.8 + noise(x * 0.2, z * 0.2) * 0.2 + noise(x * 0.55, z * 0.55) * 0.06;
+  for (const [cx, cz, r, d] of [[14, -10, 5.5, 0.8], [-16, 8, 4, 0.55], [6, 16, 3, 0.35]]) {
+    const u = Math.hypot(x - cx, z - cz) / r;
+    if (u < 1.25) h += Math.exp(-((u - 0.86) ** 2) / 0.02) * d * 0.35 - (u < 1 ? (1 - u * u) * d : 0);
+  }
+  return h;
+}
 function place(list) {
   const spots = [];
   for (const item of list) {
@@ -282,7 +312,7 @@ function endRun() {
   banner.textContent = (s >= 90 ? "STRONG PASS " : s >= 60 ? "PASS " : "BELOW THE LINE ") + s + "%";
 }
 function step(dt) {
-  if (phase !== "play") { rover.speed = 0; return; }
+  if (!live || phase !== "play") { rover.speed = 0; return; }
   timeLeft -= dt;
   let turn = 0;
   if (keys["a"] || keys["arrowleft"]) { turn += 1; follow = false; goal = null; }
@@ -317,17 +347,21 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.22;
 renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
 viewEl.appendChild(renderer.domElement);
-scene.add(new THREE.HemisphereLight(0xd8ffe4, 0x2a4a34, 0.9));
-const sun = new THREE.DirectionalLight(0xfff4dd, 2.2);
-sun.position.set(20, 36, 12);
+scene.add(new THREE.HemisphereLight(0xc8e6c4, 0x1c3a28, 0.32));
+const sun = new THREE.DirectionalLight(0xfff0d0, 4.1);
+sun.position.set(64, 14, 20);
 sun.castShadow = true;
-sun.shadow.mapSize.set(1024, 1024);
-sun.shadow.camera.left = -40; sun.shadow.camera.right = 40;
-sun.shadow.camera.top = 40; sun.shadow.camera.bottom = -40;
-sun.shadow.camera.near = 1; sun.shadow.camera.far = 110;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -36; sun.shadow.camera.right = 36;
+sun.shadow.camera.top = 36; sun.shadow.camera.bottom = -36;
+sun.shadow.camera.near = 8; sun.shadow.camera.far = 140;
+sun.shadow.bias = -0.0003;
+sun.shadow.normalBias = 0.03;
 scene.add(sun);
+scene.add(sun.target);
 const lamp = new THREE.PointLight(0x9dff6a, 0.4, 18);
 lamp.position.set(-18, 4, 16);
 scene.add(lamp);
@@ -340,7 +374,10 @@ scene.add(lamp);
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i), z = pos.getZ(i), h = heightAt(x, z);
     pos.setY(i, h);
-    const col = lo.clone().lerp(hi, clamp(0.35 + h * 0.35, 0, 1));
+    const col = lo.clone().lerp(hi, clamp(0.32 + h * 0.35, 0, 1));
+    const n = (noise(x * 0.8, z * 0.8) + 1) * 0.5;
+    col.offsetHSL(0.02, 0, (n - 0.5) * 0.1);
+    if (h < -0.12) col.multiplyScalar(0.82);
     colors[i * 3] = col.r; colors[i * 3 + 1] = col.g; colors[i * 3 + 2] = col.b;
   }
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
@@ -373,19 +410,54 @@ const iceDisc = ice ? disc(ice.x, ice.z, 8, 0xb7fff2, 0.28) : null;
 const iceCore = ice ? disc(ice.x, ice.z, 2.4, 0xe8fffb, 0.85) : null;
 function buildRover() {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.4, 2), new THREE.MeshStandardMaterial({ color: 0xd7e6d4, roughness: 0.5, metalness: 0.3 }));
-  body.position.y = 0.5; body.castShadow = true; g.add(body);
-  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.9), new THREE.MeshStandardMaterial({ color: 0xc86bff, emissive: 0x301040 }));
-  arm.position.set(0.7, 0.7, 0.4); arm.visible = false; g.add(arm);
-  const dish = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.08, 14), new THREE.MeshStandardMaterial({ color: 0xffcc66, metalness: 0.5, roughness: 0.3 }));
-  dish.position.set(-0.2, 1.25, -0.45); dish.visible = false; g.add(dish);
-  const drill = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.14, 0.9, 8), new THREE.MeshStandardMaterial({ color: 0xb7fff2, metalness: 0.6, roughness: 0.3 }));
-  drill.position.set(0, 0.7, -1.05); drill.visible = false; g.add(drill);
+  const hull = new THREE.MeshStandardMaterial({ color: 0xd7e6d4, roughness: 0.42, metalness: 0.35 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x102018, roughness: 0.8 });
+  const put = (mesh, x, y, z) => { mesh.position.set(x, y, z); mesh.castShadow = true; g.add(mesh); return mesh; };
+  put(new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.1, 1.55), dark), 0, 0.26, 0);
+  put(new THREE.Mesh(new THREE.BoxGeometry(1.28, 0.28, 1.8), hull), 0, 0.46, 0);
+  const wheelGeo = new THREE.CylinderGeometry(0.23, 0.23, 0.15, 14);
+  wheelGeo.rotateZ(Math.PI / 2);
+  [[-0.7, -0.55], [0.7, -0.55], [-0.7, 0.05], [0.7, 0.05], [-0.7, 0.6], [0.7, 0.6]].forEach(([x, z]) => {
+    const w = new THREE.Mesh(wheelGeo, dark);
+    w.position.set(x, 0.23, z); w.castShadow = true; g.add(w);
+  });
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.95), new THREE.MeshStandardMaterial({ color: 0xc86bff, emissive: 0x301040 }));
+  arm.position.set(0.72, 0.72, 0.35); arm.visible = false; arm.castShadow = true; g.add(arm);
+  const dish = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.34, 0.06, 14), new THREE.MeshStandardMaterial({ color: 0xffcc66, metalness: 0.55, roughness: 0.3 }));
+  dish.position.set(-0.15, 1.15, -0.35); dish.rotation.x = 0.4; dish.visible = false; dish.castShadow = true; g.add(dish);
+  const drill = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.12, 0.85, 8), new THREE.MeshStandardMaterial({ color: 0xb7fff2, metalness: 0.6, roughness: 0.3 }));
+  drill.position.set(0, 0.55, 0.95); drill.rotation.x = Math.PI / 2; drill.visible = false; drill.castShadow = true; g.add(drill);
   g.userData.parts = { arm, dish, drill };
   scene.add(g);
   return g;
 }
 const roverMesh = buildRover();
+{
+  const arr = new Float32Array(480 * 3);
+  for (let i = 0; i < 480; i++) {
+    const th = rand() * Math.PI * 2, ph = 0.2 + rand() * 1.1, r = 130;
+    arr[i * 3] = Math.cos(th) * Math.cos(ph) * r;
+    arr[i * 3 + 1] = Math.sin(ph) * r;
+    arr[i * 3 + 2] = Math.sin(th) * Math.cos(ph) * r;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(arr, 3));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xe8ffe8, size: 0.35, sizeAttenuation: true, transparent: true, opacity: 0.7 })));
+}
+{
+  const rock = new THREE.DodecahedronGeometry(0.36, 0);
+  const mat = new THREE.MeshStandardMaterial({ color: 0x6d7d68, roughness: 0.95 });
+  for (let i = 0; i < 28; i++) {
+    const x = (rand() - 0.5) * 56, z = (rand() - 0.5) * 56;
+    const m = new THREE.Mesh(rock, mat);
+    const s = 0.35 + rand() * (rand() < 0.12 ? 1.8 : 0.9);
+    m.scale.set(s, s * 0.4, s);
+    m.position.set(x, heightAt(x, z) - 0.04, z);
+    m.rotation.y = rand() * 6;
+    m.castShadow = true; m.receiveShadow = true;
+    scene.add(m);
+  }
+}
 
 const map = $("map");
 const ctx = map.getContext("2d");
@@ -436,7 +508,7 @@ function drawMap() {
   ctx.restore();
 }
 map.addEventListener("pointerdown", (ev) => {
-  if (phase !== "play") return;
+  if (!live || phase !== "play") return;
   const rect = map.getBoundingClientRect();
   const mx = (ev.clientX - rect.left) / rect.width;
   const my = (ev.clientY - rect.top) / rect.height;
@@ -454,7 +526,9 @@ $("follow").onclick = () => {
   follow = true; goal = null; say("Following the rover’s pin.");
 };
 $("restart").onclick = () => location.reload();
+$("begin").onclick = () => { live = true; $("brief").hidden = true; };
 window.addEventListener("keydown", (e) => {
+  if (!live) return;
   keys[e.key.toLowerCase()] = true;
   if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(e.key.toLowerCase())) e.preventDefault();
   if (e.key === "1") setMode("camera");
@@ -495,10 +569,11 @@ function frame(t) {
   roverMesh.position.set(rover.x, y, rover.z);
   roverMesh.rotation.y = rover.yaw;
   const k = 1 - Math.exp(-dt * 2.4);
-  look.lerp(new THREE.Vector3(rover.x, y + 0.7, rover.z), k);
-  camPos.lerp(new THREE.Vector3(rover.x - Math.sin(rover.yaw) * 11, y + 7, rover.z - Math.cos(rover.yaw) * 11), k);
+  look.lerp(new THREE.Vector3(rover.x + Math.sin(rover.yaw) * 2, y + 0.55, rover.z + Math.cos(rover.yaw) * 2), k);
+  camPos.lerp(new THREE.Vector3(rover.x - Math.sin(rover.yaw) * 13, y + 8.2, rover.z - Math.cos(rover.yaw) * 13), k);
   camera.position.copy(camPos);
   camera.lookAt(look);
+  sun.target.position.set(rover.x, y, rover.z);
   const w = viewEl.clientWidth, h = viewEl.clientHeight;
   if (w > 0 && h > 0 && camera.aspect !== w / h) {
     camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h, false);

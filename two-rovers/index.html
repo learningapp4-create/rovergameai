@@ -80,12 +80,36 @@
   #banner.great { color: var(--gold); }
   #banner.fail { color: var(--bad); }
   .boot-error { padding: 16px; color: var(--bad); }
+  .group-label { margin: 0; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim); }
+  .map-label { padding: 8px 12px; border-bottom: 1px solid var(--line); letter-spacing: 0.04em; }
+  .map-label b { letter-spacing: 0.08em; }
+  .brief { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 24px; background: rgba(10, 4, 16, 0.7); }
+  .brief[hidden] { display: none; }
+  .brief-card { width: min(440px, 100%); background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 16px; padding: 22px 22px 18px; box-shadow: 0 20px 50px rgba(0,0,0,.5); }
+  .brief-card .kicker { margin: 0 0 4px; letter-spacing: 0.16em; font-size: 12px; color: var(--dim); }
+  .brief-card h2 { margin: 0 0 8px; font-size: 22px; }
+  .brief-card ol { margin: 0 0 16px; padding-left: 1.15em; }
+  .brief-card li { margin: 8px 0; }
+  .brief-card button { width: 100%; padding: 12px; background: var(--luna); color: #06221f; border-color: var(--luna); font-weight: 750; }
   @media (max-width: 980px) {
     main { grid-template-columns: 1fr; grid-template-rows: auto 32vh 40vh; }
   }
 </style>
 </head>
 <body>
+<div id="brief" class="brief" role="dialog" aria-labelledby="brief-title">
+  <div class="brief-card">
+    <p class="kicker">Before you roll</p>
+    <h2 id="brief-title">Dual Link</h2>
+    <ol>
+      <li><b>Goal.</b> LUNA delivers cargo. MARE rescues the probe. Then they talk.</li>
+      <li><b>Move.</b> Select a rover, then click the map. The order arrives about a second late.</li>
+      <li><b>Decide.</b> The partner marker is stale. A ridge between you makes the picture older.</li>
+      <li><b>Score.</b> Both tasks plus a three-second handshake pass 60%. Time left can push it past 90%.</li>
+    </ol>
+    <button id="begin" type="button">Open the link</button>
+  </div>
+</div>
 <header>
   <a href="../index.html">All versions</a>
   <div>
@@ -105,8 +129,7 @@
     <div class="obj" id="o-cargo"><span>Deliver cargo</span><i>open</i></div>
     <div class="obj" id="o-rescue"><span>Rescue probe</span><i>open</i></div>
     <div class="obj" id="o-link"><span>Talk — share a fix</span><i>0%</i></div>
-    <p id="status">Commands wait on the link. The other rover's marker is where it was, not where it is.</p>
-    <p class="how">Click a rover card or press Tab. Click the map to send that rover — the order is delayed about a second. Far apart, or with the ridge between you, the partner marker lags by a few seconds. H orders both toward a meetup using the picture you have. Stay close for 3 seconds to talk. R restarts.</p>
+    <p id="status">Select a rover, then click the map.</p>
     <div class="row">
       <button id="meet">H Meetup</button>
       <button id="end">End run</button>
@@ -114,7 +137,7 @@
     </div>
   </aside>
   <div id="view"><div id="banner" hidden></div></div>
-  <div id="mapPane"><canvas id="map"></canvas></div>
+  <div id="mapPane"><div class="map-label">Click to send <b id="sendName">LUNA</b></div><canvas id="map"></canvas></div>
 </main>
 <script type="module">
 const THREE_URL = "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.min.js";
@@ -125,6 +148,7 @@ catch (err) {
   throw err;
 }
 const $ = (id) => document.getElementById(id);
+let live = false;
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 function lerp(a, b, t) { return a + (b - a) * t; }
 function normAng(d) { while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return d; }
@@ -182,6 +206,11 @@ let graded = false;
 function heightAt(x, z) {
   let h = (noise(x * 0.08, z * 0.08) * 0.6 + noise(x * 0.2, z * 0.2) * 0.25) * 0.8;
   if (Math.abs(x) < 6 && z > -24 && z < 8) h += Math.exp(-(x * x) / 7) * 2.6;
+  h += noise(x * 0.55, z * 0.55) * 0.06;
+  for (const [cx, cz, r, d] of [[22, 20, 5, 0.7], [-28, 14, 4, 0.55], [16, -16, 3.4, 0.4]]) {
+    const u = Math.hypot(x - cx, z - cz) / r;
+    if (u < 1.25) h += Math.exp(-((u - 0.86) ** 2) / 0.02) * d * 0.35 - (u < 1 ? (1 - u * u) * d : 0);
+  }
   return h;
 }
 function inRidge(x, z) { return Math.abs(x) < 3.5 && z > -24 && z < 8; }
@@ -259,7 +288,7 @@ function meetup() {
   command(mare, mid.x, mid.z);
   say("Meetup order sent from the picture " + activeName + " has. The link will lag.");
 }
-function selectRover(name) { activeName = name; }
+function selectRover(name) { activeName = name; const el = $("sendName"); if (el) el.textContent = name; }
 function endRun() {
   if (graded) return;
   phase = "done";
@@ -293,7 +322,7 @@ function stepRover(r, dt) {
   r.z = clamp(r.z + Math.cos(r.yaw) * sp * dt, -28, 28);
 }
 function step(dt) {
-  if (phase !== "play") return;
+  if (!live || phase !== "play") return;
   now += dt;
   timeLeft = Math.max(0, timeLeft - dt);
   stepRover(luna, dt);
@@ -329,18 +358,21 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.12;
 renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
 viewEl.appendChild(renderer.domElement);
-scene.add(new THREE.HemisphereLight(0xd7c6ea, 0x3a2438, 0.75));
-const sun = new THREE.DirectionalLight(0xfff0dc, 2.4);
-sun.position.set(30, 48, 8);
+scene.add(new THREE.HemisphereLight(0xcbb6de, 0x2a1828, 0.28));
+const sun = new THREE.DirectionalLight(0xffe4c4, 4.3);
+sun.position.set(70, 14, 18);
 sun.castShadow = true;
-sun.shadow.mapSize.set(1024, 1024);
-sun.shadow.camera.left = -50; sun.shadow.camera.right = 50;
-sun.shadow.camera.top = 40; sun.shadow.camera.bottom = -40;
-sun.shadow.camera.near = 1; sun.shadow.camera.far = 140;
-sun.shadow.bias = -0.0006;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -40; sun.shadow.camera.right = 40;
+sun.shadow.camera.top = 36; sun.shadow.camera.bottom = -36;
+sun.shadow.camera.near = 8; sun.shadow.camera.far = 160;
+sun.shadow.bias = -0.0003;
+sun.shadow.normalBias = 0.03;
 scene.add(sun);
+scene.add(sun.target);
 {
   const geo = new THREE.PlaneGeometry(84, 64, 90, 70);
   geo.rotateX(-Math.PI / 2);
@@ -350,7 +382,10 @@ scene.add(sun);
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i), z = pos.getZ(i), h = heightAt(x, z);
     pos.setY(i, h);
-    const col = lo.clone().lerp(hi, clamp(0.25 + h * 0.22, 0, 1));
+    const col = lo.clone().lerp(hi, clamp(0.22 + h * 0.2, 0, 1));
+    const n = (noise(x * 0.7, z * 0.7) + 1) * 0.5;
+    col.offsetHSL(0.01, 0, (n - 0.5) * 0.1);
+    if (Math.abs(x) < 4 && z > -24 && z < 8) col.offsetHSL(0.02, 0.05, 0.04);
     colors[i * 3] = col.r; colors[i * 3 + 1] = col.g; colors[i * 3 + 2] = col.b;
   }
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
@@ -361,16 +396,23 @@ scene.add(sun);
 }
 function buildRover(color) {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.42, 2.1), new THREE.MeshStandardMaterial({ color, roughness: 0.45, metalness: 0.35 }));
-  body.position.y = 0.55; body.castShadow = true; g.add(body);
-  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 1.2, 8), new THREE.MeshStandardMaterial({ color: 0xf4efe6, metalness: 0.5, roughness: 0.3 }));
-  mast.position.set(0, 1.3, -0.4); g.add(mast);
-  const wheelGeo = new THREE.CylinderGeometry(0.26, 0.26, 0.22, 10);
+  const paint = new THREE.MeshStandardMaterial({ color, roughness: 0.38, metalness: 0.42 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x140c18, roughness: 0.8 });
+  const foil = new THREE.MeshStandardMaterial({ color: 0xf4efe6, roughness: 0.3, metalness: 0.55 });
+  const put = (mesh, x, y, z) => { mesh.position.set(x, y, z); mesh.castShadow = true; g.add(mesh); return mesh; };
+  put(new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.1, 1.6), dark), 0, 0.26, 0);
+  put(new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.28, 1.85), paint), 0, 0.46, 0);
+  put(new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.16, 0.42), foil), 0, 0.66, 0.45);
+  const mast = put(new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.045, 0.85, 8), foil), 0, 1.1, -0.25);
+  const dish = put(new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.26, 0.05, 12), paint), 0, 1.55, -0.25);
+  dish.rotation.z = 0.4;
+  const wheelGeo = new THREE.CylinderGeometry(0.24, 0.24, 0.16, 14);
   wheelGeo.rotateZ(Math.PI / 2);
   const wheels = [];
-  [[-0.7, -0.65], [0.7, -0.65], [-0.7, 0.15], [0.7, 0.15], [-0.7, 0.75], [0.7, 0.75]].forEach(([x, z]) => {
-    const w = new THREE.Mesh(wheelGeo, new THREE.MeshStandardMaterial({ color: 0x1a121c, roughness: 1 }));
-    w.position.set(x, 0.28, z); g.add(w); wheels.push(w);
+  [[-0.72, -0.58], [0.72, -0.58], [-0.72, 0.05], [0.72, 0.05], [-0.72, 0.64], [0.72, 0.64]].forEach(([x, z]) => {
+    const w = new THREE.Mesh(wheelGeo, dark);
+    w.position.set(x, 0.24, z); w.castShadow = true; g.add(w); wheels.push(w);
+    put(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.32), dark), x * 0.6, 0.36, z);
   });
   g.userData.wheels = wheels;
   scene.add(g);
@@ -386,6 +428,32 @@ const probeMesh = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.4, 8), new THREE
 probeMesh.position.set(probe.x, heightAt(probe.x, probe.z) + 0.7, probe.z);
 probeMesh.visible = false;
 scene.add(probeMesh);
+{
+  const arr = new Float32Array(560 * 3);
+  for (let i = 0; i < 560; i++) {
+    const th = rand() * Math.PI * 2, ph = 0.2 + rand() * 1.15, r = 140;
+    arr[i * 3] = Math.cos(th) * Math.cos(ph) * r;
+    arr[i * 3 + 1] = Math.sin(ph) * r;
+    arr[i * 3 + 2] = Math.sin(th) * Math.cos(ph) * r;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(arr, 3));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xf6efe6, size: 0.4, sizeAttenuation: true, transparent: true, opacity: 0.75 })));
+}
+{
+  const rock = new THREE.DodecahedronGeometry(0.38, 0);
+  const mat = new THREE.MeshStandardMaterial({ color: 0x6e5c78, roughness: 0.94 });
+  for (let i = 0; i < 32; i++) {
+    const x = -36 + rand() * 72, z = -26 + rand() * 50;
+    const m = new THREE.Mesh(rock, mat);
+    const s = 0.35 + rand() * (rand() < 0.14 ? 2.1 : 1);
+    m.scale.set(s, s * 0.4, s * 0.85);
+    m.position.set(x, heightAt(x, z) - 0.04, z);
+    m.rotation.y = rand() * 6;
+    m.castShadow = true; m.receiveShadow = true;
+    scene.add(m);
+  }
+}
 
 const MAP_W = 84, MAP_H = 64;
 const map = $("map");
@@ -482,7 +550,7 @@ function drawMap() {
   ctx.fillText(delay < 0.5 ? "LINK LIVE" : "LINK " + delay.toFixed(1) + "s STALE", 8, 16);
 }
 map.addEventListener("pointerdown", (ev) => {
-  if (phase !== "play") return;
+  if (!live || phase !== "play") return;
   const rect = map.getBoundingClientRect();
   const mx = (ev.clientX - rect.left) / rect.width;
   const my = (ev.clientY - rect.top) / rect.height;
@@ -499,7 +567,9 @@ $("card-mare").onclick = () => selectRover("MARE");
 $("meet").onclick = meetup;
 $("end").onclick = endRun;
 $("restart").onclick = () => location.reload();
+$("begin").onclick = () => { live = true; $("brief").hidden = true; };
 window.addEventListener("keydown", (e) => {
+  if (!live) return;
   if (e.key === "Tab") { e.preventDefault(); selectRover(activeName === "LUNA" ? "MARE" : "LUNA"); }
   else if (e.key === "h" || e.key === "H") meetup();
   else if (e.key === "Enter") endRun();
@@ -531,10 +601,11 @@ function frame(t) {
   const me = active();
   const y = heightAt(me.x, me.z);
   const k = 1 - Math.exp(-dt * 2.2);
-  look.lerp(new THREE.Vector3(me.x, y + 1, me.z), k);
-  camPos.lerp(new THREE.Vector3(me.x - Math.sin(me.yaw) * 14, y + 8.5, me.z - Math.cos(me.yaw) * 14), k);
+  look.lerp(new THREE.Vector3(me.x + Math.sin(me.yaw) * 2, y + 0.7, me.z + Math.cos(me.yaw) * 2), k);
+  camPos.lerp(new THREE.Vector3(me.x - Math.sin(me.yaw) * 15, y + 9.2, me.z - Math.cos(me.yaw) * 15), k);
   camera.position.copy(camPos);
   camera.lookAt(look);
+  sun.target.position.set(me.x, y, me.z);
   const w = viewEl.clientWidth, h = viewEl.clientHeight;
   if (w > 0 && h > 0 && camera.aspect !== w / h) {
     camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h, false);

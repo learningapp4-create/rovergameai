@@ -82,6 +82,16 @@
   .legend { display: flex; gap: 10px; font-size: 12px; color: var(--dim); }
   .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
   .boot-error { padding: 16px; color: var(--hazard); }
+  .group-label { margin: 2px 0 0; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim); }
+  button.primary { background: var(--copper); color: #1a1208; border-color: var(--copper); font-weight: 750; }
+  .brief { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 24px; background: rgba(5, 8, 16, 0.68); }
+  .brief[hidden] { display: none; }
+  .brief-card { width: min(440px, 100%); background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 16px; padding: 22px 22px 18px; box-shadow: 0 20px 50px rgba(0,0,0,.5); }
+  .brief-card .kicker { margin: 0 0 4px; letter-spacing: 0.16em; font-size: 12px; color: var(--dim); }
+  .brief-card h2 { margin: 0 0 8px; font-size: 22px; letter-spacing: 0.06em; }
+  .brief-card ol { margin: 0 0 16px; padding-left: 1.15em; }
+  .brief-card li { margin: 8px 0; }
+  .brief-card .primary { width: 100%; padding: 12px; }
   @media (max-width: 860px) {
     main { grid-template-columns: 1fr; grid-template-rows: 38vh 1fr; }
     .scorebox { min-width: 180px; }
@@ -89,6 +99,20 @@
 </style>
 </head>
 <body>
+<div id="brief" class="brief" role="dialog" aria-labelledby="brief-title">
+  <div class="brief-card">
+    <p class="kicker">Before you roll</p>
+    <h2 id="brief-title">Ping Budget</h2>
+    <ol>
+      <li><b>Goal.</b> Sample the mineral hills and the ice craters.</li>
+      <li><b>Look.</b> The relief map shows the ground. The view follows the rover.</li>
+      <li><b>Decide.</b> Eight pings. A mineral scan, an ice scan, and a hazard scan each miss the other two.</li>
+      <li><b>Commit.</b> Lay waypoints, then send the rover. It only dodges hazards you scanned.</li>
+      <li><b>Score.</b> 60% passes. A clean mix of minerals and ice can clear 90%.</li>
+    </ol>
+    <button id="begin" class="primary" type="button">Start the survey</button>
+  </div>
+</div>
 <header>
   <a href="../index.html">All versions</a>
   <div>
@@ -110,12 +134,14 @@
 <main>
   <div id="view"><div id="banner" hidden></div></div>
   <aside>
+    <p class="group-label">Sensor</p>
     <div class="modes">
       <button id="m-mineral" aria-pressed="true">1 Mineral</button>
       <button id="m-ice" class="ice">2 Ice</button>
       <button id="m-hazard" class="hazard">3 Hazard</button>
       <button id="m-route" class="route">4 Route</button>
     </div>
+    <p class="group-label">Map — click to ping or place</p>
     <div id="mapWrap"><canvas id="map"></canvas></div>
     <div class="legend">
       <span><i style="background:#e39a4a"></i>mineral</span>
@@ -123,10 +149,9 @@
       <span><i style="background:#ff6b7a"></i>hazard</span>
       <span><i style="background:#f2d2a2"></i>route</span>
     </div>
-    <p id="status">Eight pings. Hills can hide minerals. Craters can hide ice. One of each is empty.</p>
-    <p class="how">Keys 1–3 choose a sensor, then click the map (8 pings). Key 4 sets waypoints (8 max). Enter sends the rover. It samples whatever it drives over and steers around hazards you scanned. Backspace undoes a point. R restarts.</p>
+    <p id="status">Choose a sensor, then click the map.</p>
+    <button id="commit" class="primary">Commit route</button>
     <div class="row">
-      <button id="commit">Commit route</button>
       <button id="undo">Undo</button>
       <button id="restart">Restart</button>
     </div>
@@ -148,6 +173,7 @@ const PING_R = 9;
 const BUDGET_MAX = 8;
 const WP_MAX = 8;
 const $ = (id) => document.getElementById(id);
+let live = false;
 
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 function lerp(a, b, t) { return a + (b - a) * t; }
@@ -264,6 +290,7 @@ function heightAt(x, z) {
       h += rim * c.depth - cup * c.depth;
     }
   }
+  h += fbm(x * 0.55, z * 0.55) * 0.07;
   return h;
 }
 
@@ -316,38 +343,52 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
 viewEl.appendChild(renderer.domElement);
 
-scene.add(new THREE.HemisphereLight(0xc5d2e4, 0x5c5146, 0.72));
-const sun = new THREE.DirectionalLight(0xfff1dc, 2.5);
-sun.position.set(28, 46, 14);
+scene.add(new THREE.HemisphereLight(0xb7c4d6, 0x4a4036, 0.32));
+const sun = new THREE.DirectionalLight(0xffe0b0, 4.4);
+sun.position.set(68, 15, 26);
 sun.castShadow = true;
-sun.shadow.mapSize.set(1024, 1024);
-sun.shadow.camera.left = -40;
-sun.shadow.camera.right = 40;
-sun.shadow.camera.top = 40;
-sun.shadow.camera.bottom = -40;
-sun.shadow.camera.near = 1;
-sun.shadow.camera.far = 140;
-sun.shadow.bias = -0.0006;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -36;
+sun.shadow.camera.right = 36;
+sun.shadow.camera.top = 36;
+sun.shadow.camera.bottom = -36;
+sun.shadow.camera.near = 10;
+sun.shadow.camera.far = 150;
+sun.shadow.bias = -0.00035;
+sun.shadow.normalBias = 0.028;
 scene.add(sun);
-const fill = new THREE.DirectionalLight(0x8eaccc, 0.38);
-fill.position.set(-24, 18, -16);
+scene.add(sun.target);
+const fill = new THREE.DirectionalLight(0x7f93ad, 0.16);
+fill.position.set(-36, 8, -20);
 scene.add(fill);
 
 function addStars() {
-  const arr = new Float32Array(450 * 3);
-  for (let i = 0; i < 450; i++) {
+  const arr = new Float32Array(700 * 3);
+  for (let i = 0; i < 700; i++) {
     const th = rand() * Math.PI * 2;
-    const ph = rand() * 1.1;
+    const ph = 0.2 + rand() * 1.2;
     const r = 150;
     arr[i * 3] = Math.cos(th) * Math.cos(ph) * r;
-    arr[i * 3 + 1] = 18 + Math.sin(ph) * r * 0.55;
+    arr[i * 3 + 1] = Math.sin(ph) * r;
     arr[i * 3 + 2] = Math.sin(th) * Math.cos(ph) * r;
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.BufferAttribute(arr, 3));
-  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffffff, size: 0.55, sizeAttenuation: true })));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xf7f1e4, size: 0.42, sizeAttenuation: true, transparent: true, opacity: 0.8 })));
 }
 addStars();
+const motes = [];
+{
+  const geo = new THREE.SphereGeometry(0.03, 4, 3);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xd9cbb6, transparent: true, opacity: 0.28 });
+  for (let i = 0; i < 48; i++) {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set((rand() - 0.5) * 48, 0.25 + rand() * 1.6, (rand() - 0.5) * 48);
+    m.userData.s = 0.35 + rand() * 0.9;
+    scene.add(m);
+    motes.push(m);
+  }
+}
 
 function buildTerrain() {
   const segs = 96;
@@ -365,8 +406,9 @@ function buildTerrain() {
     pos.setY(i, h);
     const t = clamp(h / 2.4 + 0.38, 0, 1);
     const col = t < 0.5 ? low.clone().lerp(mid, t * 2) : mid.clone().lerp(high, (t - 0.5) * 2);
-    const n = (fbm(x * 0.35, z * 0.35) + 1) * 0.5;
-    col.offsetHSL(0, 0, (n - 0.5) * 0.05);
+    const n = (fbm(x * 0.9, z * 0.9) + 1) * 0.5;
+    col.offsetHSL((n - 0.5) * 0.02, 0, (n - 0.5) * 0.14);
+    if (h < -0.2) col.multiplyScalar(0.78);
     colors[i * 3] = col.r;
     colors[i * 3 + 1] = col.g;
     colors[i * 3 + 2] = col.b;
@@ -381,16 +423,16 @@ function buildTerrain() {
 buildTerrain();
 
 function scatterRocks() {
-  const geo = new THREE.IcosahedronGeometry(0.35, 0);
-  const mat = new THREE.MeshStandardMaterial({ color: 0x8d867c, roughness: 0.9 });
-  for (let i = 0; i < 28; i++) {
+  const geos = [new THREE.DodecahedronGeometry(0.42, 0), new THREE.IcosahedronGeometry(0.34, 0)];
+  const mat = new THREE.MeshStandardMaterial({ color: 0x8d867c, roughness: 0.94, metalness: 0.02 });
+  for (let i = 0; i < 46; i++) {
     const x = -26 + rand() * 52;
     const z = -26 + rand() * 52;
-    const m = new THREE.Mesh(geo, mat);
-    const s = 0.4 + rand() * 1.3;
-    m.scale.set(s, s * (0.6 + rand() * 0.5), s);
-    m.position.set(x, heightAt(x, z) + 0.15 * s, z);
-    m.rotation.set(rand(), rand(), rand());
+    const m = new THREE.Mesh(geos[i % 2], mat);
+    const s = 0.35 + rand() * (rand() < 0.12 ? 2.2 : 1.05);
+    m.scale.set(s * (0.7 + rand() * 0.6), s * (0.35 + rand() * 0.4), s);
+    m.position.set(x, heightAt(x, z) - 0.04, z);
+    m.rotation.set(rand() * 0.5, rand() * 6, rand() * 0.5);
     m.castShadow = true;
     m.receiveShadow = true;
     scene.add(m);
@@ -400,36 +442,42 @@ scatterRocks();
 
 function buildRover() {
   const g = new THREE.Group();
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0xd8d2c8, roughness: 0.55, metalness: 0.25 });
-  const accent = new THREE.MeshStandardMaterial({ color: 0xe39a4a, roughness: 0.45, metalness: 0.2 });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.42, 2.15), bodyMat);
-  body.position.y = 0.55;
-  body.castShadow = true;
-  g.add(body);
-  const cab = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.34, 0.72), accent);
-  cab.position.set(0, 0.88, 0.25);
-  cab.castShadow = true;
-  g.add(cab);
-  const wheelGeo = new THREE.CylinderGeometry(0.28, 0.28, 0.24, 12);
+  const hull = new THREE.MeshStandardMaterial({ color: 0xd9d3c8, roughness: 0.42, metalness: 0.48 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x171b20, roughness: 0.78, metalness: 0.18 });
+  const accent = new THREE.MeshStandardMaterial({ color: 0xe39a4a, roughness: 0.36, metalness: 0.45 });
+  const foil = new THREE.MeshStandardMaterial({ color: 0xc6a15a, roughness: 0.32, metalness: 0.72 });
+  const solarMat = new THREE.MeshStandardMaterial({ color: 0x1a2433, roughness: 0.28, metalness: 0.62 });
+  const put = (mesh, x, y, z) => { mesh.position.set(x, y, z); mesh.castShadow = true; g.add(mesh); return mesh; };
+  put(new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.1, 1.55), dark), 0, 0.28, 0);
+  put(new THREE.Mesh(new THREE.BoxGeometry(1.28, 0.28, 1.85), hull), 0, 0.46, 0);
+  put(new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.2, 0.5), accent), 0, 0.66, 0.4);
+  const panel = put(new THREE.Mesh(new THREE.BoxGeometry(1.18, 0.035, 0.76), solarMat), 0, 0.86, -0.28);
+  panel.rotation.x = -0.22;
+  const wheelGeo = new THREE.CylinderGeometry(0.24, 0.24, 0.16, 16);
   wheelGeo.rotateZ(Math.PI / 2);
-  const wmat = new THREE.MeshStandardMaterial({ color: 0x22262c, roughness: 0.95 });
+  const hubGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.18, 8);
+  hubGeo.rotateZ(Math.PI / 2);
   const wheels = [];
-  [[-0.72, -0.7], [0.72, -0.7], [-0.72, 0.05], [0.72, 0.05], [-0.72, 0.75], [0.72, 0.75]].forEach(([x, z]) => {
-    const w = new THREE.Mesh(wheelGeo, wmat);
-    w.position.set(x, 0.28, z);
+  [[-0.74, -0.58], [0.74, -0.58], [-0.74, 0.02], [0.74, 0.02], [-0.74, 0.62], [0.74, 0.62]].forEach(([x, z]) => {
+    const w = new THREE.Mesh(wheelGeo, dark);
+    w.position.set(x, 0.24, z);
     w.castShadow = true;
+    const hub = new THREE.Mesh(hubGeo, foil);
+    hub.position.x = x > 0 ? 0.02 : -0.02;
+    w.add(hub);
     g.add(w);
+    put(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.34), dark), x * 0.62, 0.38, z);
     wheels.push(w);
   });
-  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, 1.15, 8), new THREE.MeshStandardMaterial({ color: 0xd5d8de, metalness: 0.6, roughness: 0.3 }));
-  mast.position.set(-0.15, 1.35, -0.7);
-  g.add(mast);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.16, 0.22), accent);
-  head.position.set(-0.15, 1.92, -0.55);
-  g.add(head);
-  const lamp = new THREE.PointLight(0xffc89a, 0.7, 9);
-  lamp.position.set(0, 0.7, 1.2);
-  g.add(lamp);
+  put(new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.045, 0.7, 8), hull), -0.28, 1.12, -0.05);
+  const dish = put(new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 0.06, 14), accent), -0.28, 1.52, -0.05);
+  dish.rotation.x = 0.5;
+  const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.05, 8), foil);
+  lens.rotation.x = Math.PI / 2;
+  lens.position.set(0, 0.66, 0.96);
+  g.add(lens);
+  const whip = put(new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.012, 0.6, 4), foil), 0.4, 1.02, -0.55);
+  whip.rotation.z = -0.28;
   g.userData.wheels = wheels;
   scene.add(g);
   return g;
@@ -675,7 +723,7 @@ function undo() {
   say("Removed the last waypoint.");
 }
 function onMap(ev) {
-  if (phase !== "plan") return;
+  if (!live || phase !== "plan") return;
   const p = eventToWorld(ev);
   if (mode === "route") addWaypoint(p.x, p.z);
   else addPing(p.x, p.z);
@@ -721,7 +769,7 @@ function finish() {
   say(s >= 60 ? "Route complete. That clears the pass line." : "Route complete. 60% is the pass line.");
 }
 function stepDrive(dt) {
-  if (phase !== "drive") return;
+  if (!live || phase !== "drive") return;
   if (rover.stun > 0) { rover.stun -= dt; rover.speed = 0; return; }
   if (wpIndex >= wps.length) { finish(); return; }
   const wp = wps[wpIndex];
@@ -785,7 +833,9 @@ $("m-route").onclick = () => setMode("route");
 $("undo").onclick = undo;
 $("commit").onclick = commit;
 $("restart").onclick = () => location.reload();
+$("begin").onclick = () => { live = true; $("brief").hidden = true; };
 window.addEventListener("keydown", (e) => {
+  if (!live) return;
   if (e.key === "1") setMode("mineral");
   else if (e.key === "2") setMode("ice");
   else if (e.key === "3") setMode("hazard");
@@ -823,24 +873,29 @@ function frame(now) {
   const k = 1 - Math.exp(-dt * 2.6);
   let camX, camY, camZ, lookX, lookY, lookZ;
   if (phase === "plan") {
-    camX = rover.x - 11;
-    camZ = rover.z - 13;
-    camY = y + 8;
-    lookX = rover.x + 4;
-    lookY = y + 0.5;
-    lookZ = rover.z + 2;
+    camX = rover.x - 16;
+    camZ = rover.z - 14;
+    camY = y + 11;
+    lookX = rover.x + 5;
+    lookY = y + 0.4;
+    lookZ = rover.z + 3;
   } else {
-    camX = rover.x - Math.sin(rover.yaw) * 12;
-    camZ = rover.z - Math.cos(rover.yaw) * 12;
-    camY = Math.max(y + 7, heightAt(camX, camZ) + 3);
-    lookX = rover.x + Math.sin(rover.yaw) * 2;
-    lookY = y + 0.9;
-    lookZ = rover.z + Math.cos(rover.yaw) * 2;
+    camX = rover.x - Math.sin(rover.yaw) * 14;
+    camZ = rover.z - Math.cos(rover.yaw) * 14;
+    camY = Math.max(y + 8.2, heightAt(camX, camZ) + 2.2);
+    lookX = rover.x + Math.sin(rover.yaw) * 3;
+    lookY = y + 0.7;
+    lookZ = rover.z + Math.cos(rover.yaw) * 3;
   }
   look.lerp(new THREE.Vector3(lookX, lookY, lookZ), k);
   camPos.lerp(new THREE.Vector3(camX, camY, camZ), k);
   camera.position.copy(camPos);
   camera.lookAt(look);
+  sun.target.position.set(rover.x, y, rover.z);
+  for (const m of motes) {
+    m.position.x += m.userData.s * dt;
+    if (m.position.x > 26) m.position.x = -26;
+  }
   const w = viewEl.clientWidth;
   const h = viewEl.clientHeight;
   if (w > 0 && h > 0 && (renderer.domElement.width !== Math.floor(w * renderer.getPixelRatio()) || camera.aspect !== w / h)) {
@@ -854,7 +909,7 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 paintScore();
-say("Eight pings. Four hills hold minerals, three craters hold ice. One hill and one crater are empty.");
+say("Eight pings. One hill and one crater are empty.");
 requestAnimationFrame(frame);
 
 window.ROVER = {
