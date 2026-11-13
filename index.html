@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moon Rover Prototypes</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh;
+    background: radial-gradient(1200px 500px at 20% -10%, #243044, #070b12 55%);
+    color: #f4efe6;
+    font: 16px/1.45 "Segoe UI", system-ui, sans-serif;
+  }
+  main { max-width: 980px; margin: 0 auto; padding: 32px 20px 48px; }
+  h1 { font-size: 28px; letter-spacing: 0.08em; margin: 0 0 8px; }
+  p { max-width: 68ch; color: #d9d0c4; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 22px; }
+  a.card {
+    display: block; text-decoration: none; color: inherit;
+    background: #101722; border: 1px solid #2a3548; border-radius: 14px; padding: 16px;
+    border-top: 4px solid var(--accent);
+  }
+  a.card:hover { border-color: var(--accent); background: #152033; }
+  a.card strong { display: block; letter-spacing: 0.12em; margin-bottom: 6px; }
+  a.card span { color: #c9c0b4; }
+  .note { margin-top: 22px; color: #b7ab9c; font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>MOON ROVER</h1>
+  <p>Six short games about directing a smart rover with incomplete instruments. The pass line is 60%. Careful spending of the limited data can clear 90%. Each version is its own session: different tools, different decisions, different palette.</p>
+  <div class="grid">
+    <a class="card" style="--accent:#e39a4a" href="sensor-budget/index.html">
+      <strong>PING BUDGET</strong>
+      <span>Spend eight scans, then commit a route. The rover samples what it crosses and dodges only the hazards you pinged.</span>
+    </a>
+    <a class="card" style="--accent:#d5dde6" href="mode-map/index.html">
+      <strong>LAYER MAP</strong>
+      <span>Drive to paint one map layer at a time. Relief, heat, minerals, and ice radar each hide what the others show.</span>
+    </a>
+    <a class="card" style="--accent:#2ee6d6" href="two-rovers/index.html">
+      <strong>DUAL LINK</strong>
+      <span>Split a cargo run and a rescue across two rovers. Orders and the partner’s position arrive late.</span>
+    </a>
+    <a class="card" style="--accent:#e6b35a" href="ask-rover/index.html">
+      <strong>ROVER'S PLAN</strong>
+      <span>The rover proposes the next stop from a thin reading. Accept it, edit the heading, or override.</span>
+    </a>
+    <a class="card" style="--accent:#ffb703" href="power-dust/index.html">
+      <strong>DUST RUN</strong>
+      <span>Deliver and rescue on a power budget while dust fronts blind the thermal and radio needles.</span>
+    </a>
+    <a class="card" style="--accent:#9dff6a" href="upgrade-chain/index.html">
+      <strong>TOOL LADDER</strong>
+      <span>Scoop easy soil to unlock a spectrometer, then a thermal probe, then the drill that can see ice.</span>
+    </a>
+  </div>
+  <p class="note">Each page is self-contained and loads Three.js r170 from a CDN. The first view needs a network connection.</p>
+</main>
+</body>
+</html>

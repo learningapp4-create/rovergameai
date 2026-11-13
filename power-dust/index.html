@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dust Run — Moon Rover</title>
+<style>
+  :root { --ink: #fff6e8; --dust: #c4a574; --amber: #ffb703; --bad: #e85d04; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: #1a120c; color: var(--ink); font: 15px/1.4 "Segoe UI", system-ui, sans-serif; overflow: hidden; }
+  #view { position: absolute; inset: 0; }
+  #view canvas { width: 100%; height: 100%; display: block; }
+  header {
+    position: absolute; left: 12px; right: 12px; top: 10px; display: flex; gap: 14px; align-items: center;
+    background: #1a120ccc; border: 1px solid #6a4e32; border-radius: 12px; padding: 8px 12px;
+  }
+  header a { color: var(--dust); text-decoration: none; font-size: 13px; }
+  h1 { margin: 0; font-size: 15px; letter-spacing: 0.14em; }
+  h1 span { color: var(--amber); }
+  .scorebox { margin-left: auto; min-width: 260px; }
+  .score-row { display: flex; justify-content: space-between; font-size: 13px; }
+  #pct { font-size: 20px; font-weight: 750; }
+  .meter { position: relative; height: 12px; background: #3a2a1c; border-radius: 99px; margin-top: 4px; }
+  .meter .fill { height: 100%; width: 0; background: #a07848; border-radius: 99px; }
+  .meter.pass .fill { background: #d8c07a; }
+  .meter.great .fill { background: linear-gradient(90deg, #d8c07a, #fff1c9); }
+  .tick { position: absolute; top: -3px; width: 2px; height: 18px; background: #fff; }
+  .tick.gold { background: #fff1c9; }
+  #map {
+    position: absolute; left: 12px; bottom: 12px; width: min(340px, 38vw); height: min(250px, 32vh);
+    border-radius: 12px; border: 1px solid #6a4e32; background: #24180f;
+  }
+  #panel {
+    position: absolute; right: 12px; bottom: 12px; width: min(340px, 40vw);
+    background: #1a120ce6; border: 1px solid #6a4e32; border-radius: 12px; padding: 10px;
+  }
+  .row { display: flex; gap: 8px; align-items: center; }
+  #needle { width: 120px; height: 120px; background: #2a1c12; border-radius: 50%; border: 2px solid var(--dust); }
+  #powerWrap { flex: 1; }
+  #powerWrap .bar { height: 14px; background: #3a2a1c; border-radius: 99px; overflow: hidden; }
+  #powerFill { height: 100%; width: 100%; background: linear-gradient(90deg, var(--bad), var(--amber)); }
+  button {
+    font: inherit; background: #3a2a1c; color: var(--ink); border: 1px solid #6a4e32;
+    border-radius: 8px; padding: 8px 10px; cursor: pointer;
+  }
+  button[aria-pressed="true"] { background: var(--amber); color: #2a1c08; font-weight: 750; }
+  .how { margin: 8px 0 0; color: #f3e6d0; }
+  #status { min-height: 2.4em; color: var(--dust); margin: 6px 0; }
+  #banner {
+    position: absolute; left: 50%; top: 72px; transform: translateX(-50%);
+    background: #1a120cf2; border: 1px solid var(--amber); border-radius: 12px; padding: 10px 14px; font-weight: 750;
+  }
+  #banner.pass { color: #ffe08a; }
+  #banner.great { color: #fff1c9; }
+  #banner.fail { color: #ffb088; }
+  .boot-error { padding: 16px; }
+</style>
+</head>
+<body>
+<div id="view"></div>
+<header>
+  <a href="../index.html">All versions</a>
+  <div><h1><span>DUST</span> RUN</h1><div style="color:#c4a574;font-size:13px">Power budget, blinding dust.</div></div>
+  <div class="scorebox">
+    <div class="score-row"><span id="pct">0%</span><span id="kind">SECURED · PASS 60 · STRONG 90</span></div>
+    <div class="meter" id="meter"><div class="fill" id="fill"></div><i class="tick" style="left:60%"></i><i class="tick gold" style="left:90%"></i></div>
+  </div>
+</header>
+<canvas id="map"></canvas>
+<div id="panel">
+  <div class="row">
+    <canvas id="needle" width="120" height="120"></canvas>
+    <div id="powerWrap">
+      <div>Power <b id="powerNum">100</b></div>
+      <div class="bar"><div id="powerFill"></div></div>
+      <div id="sensorName" style="margin-top:6px">Thermal · cache</div>
+      <div class="row" style="margin-top:6px">
+        <button id="b-thermal" aria-pressed="true">1 Thermal</button>
+        <button id="b-radio">2 Radio</button>
+      </div>
+    </div>
+  </div>
+  <p id="status">Cargo cache is in the eastern craters. The stranded rover is northwest, past the pale ridge. Dust blinds both sensors.</p>
+  <p class="how">WASD drives. 1 thermal seeks the cache, 2 radio seeks the beacon. N holds the last clear bearing. E drops cargo, hold F to rescue. Shift ignores the low-power limp. Sunlit ground recharges when you stop. R restarts.</p>
+  <div class="row">
+    <button id="end">End run</button>
+    <button id="restart">Restart</button>
+  </div>
+</div>
+<div id="banner" hidden></div>
+<script type="module">
+const THREE_URL = "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.min.js";
+let THREE;
+try { THREE = await import(THREE_URL); }
+catch (err) {
+  document.body.insertAdjacentHTML("beforeend", '<p class="boot-error">Could not load Three.js r170 from the CDN.</p>');
+  throw err;
+}
+const $ = (id) => document.getElementById(id);
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function normAng(d) { while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return d; }
+function makeRand(seed) {
+  let a = seed >>> 0;
+  return function rand() {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function makeNoise(rand) {
+  const perm = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) perm[i] = i;
+  for (let i = 255; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    const tmp = perm[i]; perm[i] = perm[j]; perm[j] = tmp;
+  }
+  const p = new Uint8Array(512);
+  for (let i = 0; i < 512; i++) p[i] = perm[i & 255];
+  const fade = (t) => t * t * t * (t * (t * 6 - 15) + 10);
+  const grad = (h, x, z) => { const hh = h & 3, u = hh < 2 ? x : z, v = hh < 2 ? z : x; return ((hh & 1) ? -u : u) + ((hh & 2) ? -v : v); };
+  return function noise(x, z) {
+    const X = Math.floor(x) & 255, Z = Math.floor(z) & 255, xf = x - Math.floor(x), zf = z - Math.floor(z);
+    const u = fade(xf), v = fade(zf);
+    const aa = p[p[X] + Z], ab = p[p[X] + Z + 1], ba = p[p[X + 1] + Z], bb = p[p[X + 1] + Z + 1];
+    return lerp(lerp(grad(aa, xf, zf), grad(ba, xf - 1, zf), u), lerp(grad(ab, xf, zf - 1), grad(bb, xf - 1, zf - 1), u), v);
+  };
+}
+const rand = makeRand((Date.now() ^ Math.floor(Math.random() * 1e9)) >>> 0);
+const noise = makeNoise(rand);
+const cache = { x: 22 + rand() * 6, z: -18 + rand() * 4 };
+const stranded = { x: -28 + rand() * 4, z: -16 + rand() * 6 };
+const craters = [
+  { x: cache.x, z: cache.z, r: 7, depth: 1.8 },
+  { x: -8, z: 6, r: 5, depth: 1.1 },
+  { x: 8, z: 14, r: 4, depth: 0.8 }
+];
+function heightAt(x, z) {
+  let h = noise(x * 0.06, z * 0.06) * 0.7 + noise(x * 0.18, z * 0.18) * 0.25;
+  h += Math.exp(-((x + 30) ** 2 + (z + 2) ** 2) / 80) * 2.4;
+  for (const c of craters) {
+    const d = Math.hypot(x - c.x, z - c.z) / c.r;
+    if (d < 1.15) h += Math.exp(-((d - 0.85) ** 2) / 0.02) * 0.35 - (d < 1 ? (1 - d * d) * c.depth : 0);
+  }
+  return h;
+}
+const bands = [
+  { z0: -4, z1: 20, speed: 10, width: 16, offset: 10 },
+  { z0: -32, z1: -6, speed: 7.5, width: 18, offset: 55 }
+];
+function dustCenter(b, t) { return ((t * b.speed + b.offset) % 120) - 60; }
+function inDustAt(x, z, t) {
+  return bands.some((b) => z > b.z0 && z < b.z1 && Math.abs(x - dustCenter(b, t)) < b.width * 0.5);
+}
+const rover = { x: 0, z: 26, yaw: Math.PI, speed: 0 };
+const keys = {};
+let mode = "thermal";
+let power = 100;
+let time = 0;
+let timeLeft = 170;
+let phase = "play";
+let graded = false;
+let cargoDone = false;
+let rescueDone = false;
+let rescueHold = 0;
+let hold = null;
+let jitter = 0;
+let jitterT = -1;
+let bestCargo = Math.hypot(cache.x - rover.x, cache.z - rover.z);
+let bestRescue = Math.hypot(stranded.x - rover.x, stranded.z - rover.z);
+const crumbs = [];
+let est = { thermal: null, radio: null };
+
+function partial(best) {
+  if (best >= 42) return 0;
+  return 22 * (1 - clamp((best - 5) / 37, 0, 1));
+}
+function liveScore() {
+  let s = (cargoDone ? 40 : 0) + (rescueDone ? 40 : 0);
+  if (cargoDone && rescueDone) s += 20 * clamp(power / 50, 0, 1);
+  return clamp(Math.round(s), 0, 100);
+}
+function finalScore() {
+  let s = (cargoDone ? 40 : partial(bestCargo)) + (rescueDone ? 40 : partial(bestRescue));
+  if (cargoDone && rescueDone) s += 20 * clamp(power / 50, 0, 1);
+  return clamp(Math.round(s), 0, 100);
+}
+function say(t) { $("status").textContent = t; }
+function paintScore() {
+  const s = graded ? finalScore() : liveScore();
+  $("pct").textContent = s + "%";
+  $("kind").textContent = (graded ? "COMPLETION" : "SECURED") + " · PASS 60 · STRONG 90";
+  $("fill").style.width = s + "%";
+  $("meter").className = "meter" + (s >= 90 ? " great" : s >= 60 ? " pass" : "");
+  $("powerNum").textContent = Math.round(power);
+  $("powerFill").style.width = power + "%";
+  $("sensorName").textContent = mode === "thermal" ? "Thermal · cold cache" : "Radio · distress beacon";
+  $("b-thermal").setAttribute("aria-pressed", mode === "thermal" ? "true" : "false");
+  $("b-radio").setAttribute("aria-pressed", mode === "radio" ? "true" : "false");
+}
+function reading() {
+  const target = mode === "thermal" ? cache : stranded;
+  const dx = target.x - rover.x, dz = target.z - rover.z;
+  const dist = Math.hypot(dx, dz);
+  const range = 34;
+  const dusty = inDustAt(rover.x, rover.z, time);
+  if (time - jitterT > 0.28) {
+    jitter = (rand() - 0.5) * (dusty ? 1.35 : 0.1);
+    jitterT = time;
+  }
+  if (dist > range) return { strength: 0, bearing: 0, dusty, dist };
+  let bearing = normAng(Math.atan2(dx, dz) - rover.yaw);
+  const strength = (1 - dist / range) * (dusty ? 0.2 : 1);
+  return { strength, bearing: bearing + (strength > 0.05 ? jitter : 0), dusty, dist };
+}
+function endRun(reason) {
+  if (graded) return;
+  phase = "done";
+  graded = true;
+  const s = finalScore();
+  const banner = $("banner");
+  banner.hidden = false;
+  banner.className = s >= 90 ? "great" : s >= 60 ? "pass" : "fail";
+  banner.textContent = (s >= 90 ? "STRONG PASS " : s >= 60 ? "PASS " : "BELOW THE LINE ") + s + "% · cargo " + (cargoDone ? "yes" : "no") + " · rescue " + (rescueDone ? "yes" : "no") + " · power " + Math.round(power);
+  say(reason || "Run graded. Closeness is included now.");
+}
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x140e0a);
+scene.fog = new THREE.FogExp2(0x140e0a, 0.016);
+const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 200);
+const viewEl = $("view");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.12;
+renderer.shadowMap.enabled = true;
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+viewEl.appendChild(renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xf0d7b0, 0x5a4030, 0.7));
+const sun = new THREE.DirectionalLight(0xfff1d2, 2.6);
+sun.position.set(18, 46, 24);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.camera.left = -45; sun.shadow.camera.right = 45;
+sun.shadow.camera.top = 45; sun.shadow.camera.bottom = -45;
+sun.shadow.camera.near = 1; sun.shadow.camera.far = 130;
+sun.shadow.bias = -0.0005;
+scene.add(sun);
+{
+  const geo = new THREE.PlaneGeometry(100, 100, 90, 90);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position;
+  const colors = new Float32Array(pos.count * 3);
+  const lo = new THREE.Color(0x4a3424), hi = new THREE.Color(0xd2b48a);
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i), h = heightAt(x, z);
+    pos.setY(i, h);
+    const col = lo.clone().lerp(hi, clamp(0.3 + h * 0.28, 0, 1));
+    colors[i * 3] = col.r; colors[i * 3 + 1] = col.g; colors[i * 3 + 2] = col.b;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96 }));
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+}
+function buildRover() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.42, 2.1), new THREE.MeshStandardMaterial({ color: 0xe7d3b0, roughness: 0.5, metalness: 0.25 }));
+  body.position.y = 0.52; body.castShadow = true; g.add(body);
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.06, 1.4), new THREE.MeshStandardMaterial({ color: 0x223042, metalness: 0.6, roughness: 0.3 }));
+  panel.position.set(0, 0.78, -0.1); g.add(panel);
+  const wheelGeo = new THREE.CylinderGeometry(0.27, 0.27, 0.22, 10);
+  wheelGeo.rotateZ(Math.PI / 2);
+  const wheels = [];
+  [[-0.7, -0.65], [0.7, -0.65], [-0.7, 0.1], [0.7, 0.1], [-0.7, 0.75], [0.7, 0.75]].forEach(([x, z]) => {
+    const w = new THREE.Mesh(wheelGeo, new THREE.MeshStandardMaterial({ color: 0x1a120c, roughness: 1 }));
+    w.position.set(x, 0.28, z); g.add(w); wheels.push(w);
+  });
+  g.userData.wheels = wheels;
+  scene.add(g);
+  return g;
+}
+const roverMesh = buildRover();
+const cacheMesh = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.7, 1.4), new THREE.MeshStandardMaterial({ color: 0xffe08a, roughness: 0.5 }));
+cacheMesh.position.set(cache.x, heightAt(cache.x, cache.z) + 0.35, cache.z);
+cacheMesh.visible = false;
+scene.add(cacheMesh);
+const strandedMesh = new THREE.Group();
+{
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.4, 2), new THREE.MeshStandardMaterial({ color: 0x8d5a3c, roughness: 0.7 }));
+  body.position.y = 0.4;
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.4, 6), new THREE.MeshStandardMaterial({ color: 0xffb703 }));
+  mast.position.y = 1.2;
+  strandedMesh.add(body, mast);
+  strandedMesh.position.set(stranded.x, heightAt(stranded.x, stranded.z), stranded.z);
+  strandedMesh.visible = false;
+  scene.add(strandedMesh);
+}
+const dustGeo = new THREE.BufferGeometry();
+const dustArr = new Float32Array(180 * 3);
+for (let i = 0; i < 180; i++) {
+  dustArr[i * 3] = (rand() - 0.5) * 24;
+  dustArr[i * 3 + 1] = 0.4 + rand() * 2.5;
+  dustArr[i * 3 + 2] = (rand() - 0.5) * 24;
+}
+dustGeo.setAttribute("position", new THREE.BufferAttribute(dustArr, 3));
+const dustCloud = new THREE.Points(dustGeo, new THREE.PointsMaterial({ color: 0xc4a574, size: 0.35, transparent: true, opacity: 0.45 }));
+scene.add(dustCloud);
+
+function step(dt) {
+  if (phase !== "play") return;
+  time += dt;
+  timeLeft -= dt;
+  const dusty = inDustAt(rover.x, rover.z, time);
+  let turn = 0;
+  if (keys["a"] || keys["arrowleft"]) { turn += 1; hold = null; }
+  if (keys["d"] || keys["arrowright"]) { turn -= 1; hold = null; }
+  if (hold != null) turn -= clamp(normAng(hold - rover.yaw) * 1.6, -1, 1);
+  rover.yaw += turn * 1.6 * dt;
+  let throttle = 0;
+  if (keys["w"] || keys["arrowup"]) throttle = 1;
+  if (keys["s"] || keys["arrowdown"]) throttle = -0.4;
+  const limp = power < 18 && !keys["shift"];
+  const speed = throttle * (limp ? 4.2 : 11);
+  rover.speed = speed;
+  rover.x = clamp(rover.x + Math.sin(rover.yaw) * speed * dt, -46, 46);
+  rover.z = clamp(rover.z + Math.cos(rover.yaw) * speed * dt, -46, 46);
+  const moving = Math.abs(speed) > 0.3;
+  const sunlit = !dusty && heightAt(rover.x, rover.z) > -0.15;
+  if (moving) power -= 8.2 * dt;
+  else power -= 0.35 * dt;
+  if (sunlit) power += (moving ? 0.8 : 4.6) * dt;
+  if (keys["f"] && !rescueDone && Math.hypot(rover.x - stranded.x, rover.z - stranded.z) < 5) {
+    power -= 2 * dt;
+    rescueHold += dt;
+    if (rescueHold > 1.35) { rescueDone = true; say("Rescue beacon attached."); }
+  } else rescueHold = 0;
+  power = clamp(power, 0, 100);
+  bestCargo = Math.min(bestCargo, Math.hypot(rover.x - cache.x, rover.z - cache.z));
+  bestRescue = Math.min(bestRescue, Math.hypot(rover.x - stranded.x, rover.z - stranded.z));
+  if (crumbs.length === 0 || Math.hypot(crumbs[crumbs.length - 1].x - rover.x, crumbs[crumbs.length - 1].z - rover.z) > 1.2) {
+    crumbs.push({ x: rover.x, z: rover.z });
+  }
+  const sense = reading();
+  if (!dusty && sense.strength > 0.35) {
+    const abs = rover.yaw + sense.bearing;
+    const distEst = (1 - sense.strength) * 34;
+    est[mode] = {
+      x: rover.x + Math.sin(abs) * distEst,
+      z: rover.z + Math.cos(abs) * distEst,
+      err: 3 + (1 - sense.strength) * 8
+    };
+  }
+  cacheMesh.visible = Math.hypot(rover.x - cache.x, rover.z - cache.z) < 12;
+  strandedMesh.visible = Math.hypot(rover.x - stranded.x, rover.z - stranded.z) < 12;
+  scene.fog.density = dusty ? 0.08 : 0.014;
+  dustCloud.visible = dusty;
+  if (dusty) dustCloud.position.set(rover.x, 0, rover.z);
+  if (power <= 0) { power = 0; endRun("Power is gone."); return; }
+  if (timeLeft <= 0) endRun("The sun is too low to continue.");
+  if (dusty && sense.strength < 0.15) {
+    /* keep the last status if a more specific message is up */
+  }
+}
+function deliver() {
+  if (phase !== "play" || cargoDone) return;
+  if (Math.hypot(rover.x - cache.x, rover.z - cache.z) > 5.5) { say("No cache in reach. Follow a clear thermal needle."); return; }
+  cargoDone = true;
+  power = Math.max(0, power - 4);
+  say("Cargo is down in the crater.");
+}
+function setMode(next) { mode = next; hold = null; }
+function captureHold() {
+  const sense = reading();
+  if (sense.dusty || sense.strength < 0.2) { say("The bearing is too dirty to hold."); return; }
+  hold = rover.yaw + sense.bearing;
+  say("Holding that bearing. Dust will not update it.");
+}
+
+const map = $("map");
+const ctx = map.getContext("2d");
+const WORLD = 100;
+function worldToMap(x, z, w, h) { return { px: (x / WORLD + 0.5) * w, py: (z / WORLD + 0.5) * h }; }
+function drawMap() {
+  const w = map.clientWidth, h = map.clientHeight;
+  if (w < 2 || h < 2) return;
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  if (map.width !== Math.floor(w * dpr) || map.height !== Math.floor(h * dpr)) {
+    map.width = Math.floor(w * dpr); map.height = Math.floor(h * dpr);
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = "#2a1d14";
+  ctx.fillRect(0, 0, w, h);
+  for (const b of bands) {
+    const cx = dustCenter(b, time);
+    const a = worldToMap(cx - b.width / 2, b.z0, w, h);
+    const c = worldToMap(cx + b.width / 2, b.z1, w, h);
+    ctx.fillStyle = "rgba(196,165,116,0.35)";
+    ctx.fillRect(a.px, a.py, c.px - a.px, c.py - a.py);
+  }
+  ctx.strokeStyle = "#e7d3b0";
+  ctx.beginPath();
+  crumbs.forEach((p, i) => {
+    const q = worldToMap(p.x, p.z, w, h);
+    if (i === 0) ctx.moveTo(q.px, q.py); else ctx.lineTo(q.px, q.py);
+  });
+  ctx.stroke();
+  for (const key of ["thermal", "radio"]) {
+    const e = est[key];
+    if (!e) continue;
+    const p = worldToMap(e.x, e.z, w, h);
+    ctx.strokeStyle = key === "thermal" ? "#ffb703" : "#9ad7ff";
+    ctx.beginPath();
+    ctx.arc(p.px, p.py, (e.err / WORLD) * w, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  const rp = worldToMap(rover.x, rover.z, w, h);
+  ctx.save();
+  ctx.translate(rp.px, rp.py); ctx.rotate(rover.yaw); ctx.fillStyle = "#fff6e8";
+  ctx.beginPath(); ctx.moveTo(0, 8); ctx.lineTo(5, -6); ctx.lineTo(-5, -6); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+function drawNeedle() {
+  const c = $("needle");
+  const g = c.getContext("2d");
+  const sense = reading();
+  g.clearRect(0, 0, 120, 120);
+  g.fillStyle = "#2a1c12";
+  g.beginPath(); g.arc(60, 60, 58, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = "#c4a574";
+  g.stroke();
+  g.fillStyle = "#c4a574";
+  g.font = "11px sans-serif";
+  g.textAlign = "center";
+  g.fillText(sense.strength < 0.08 ? "NO FIX" : sense.dusty ? "DUST" : "SIGNAL", 60, 78);
+  g.save();
+  g.translate(60, 60);
+  g.rotate(sense.strength < 0.08 ? 0 : sense.bearing);
+  g.strokeStyle = sense.dusty ? "#e85d04" : "#ffb703";
+  g.lineWidth = 3;
+  g.beginPath(); g.moveTo(0, 10); g.lineTo(0, -40); g.stroke();
+  g.restore();
+  g.fillStyle = "#fff6e8";
+  g.beginPath(); g.arc(60, 60, 4, 0, Math.PI * 2); g.fill();
+}
+
+$("b-thermal").onclick = () => setMode("thermal");
+$("b-radio").onclick = () => setMode("radio");
+$("end").onclick = () => endRun();
+$("restart").onclick = () => location.reload();
+window.addEventListener("keydown", (e) => {
+  keys[e.key.toLowerCase()] = true;
+  if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(e.key.toLowerCase())) e.preventDefault();
+  if (e.key === "1") setMode("thermal");
+  if (e.key === "2") setMode("radio");
+  if (e.key === "e" || e.key === "E") deliver();
+  if (e.key === "n" || e.key === "N") captureHold();
+  if (e.key === "Enter") endRun();
+  if (e.key === "r" || e.key === "R") location.reload();
+});
+window.addEventListener("keyup", (e) => { keys[e.key.toLowerCase()] = false; });
+
+const camPos = new THREE.Vector3();
+const look = new THREE.Vector3();
+let last = performance.now();
+function frame(t) {
+  const dt = clamp((t - last) / 1000, 0, 0.05);
+  last = t;
+  step(dt);
+  const y = heightAt(rover.x, rover.z);
+  roverMesh.position.set(rover.x, y, rover.z);
+  roverMesh.rotation.y = rover.yaw;
+  for (const w of roverMesh.userData.wheels) w.rotation.x += rover.speed * dt * 2;
+  const k = 1 - Math.exp(-dt * 2.3);
+  look.lerp(new THREE.Vector3(rover.x, y + 0.8, rover.z), k);
+  camPos.lerp(new THREE.Vector3(rover.x - Math.sin(rover.yaw) * 12, y + 7, rover.z - Math.cos(rover.yaw) * 12), k);
+  camera.position.copy(camPos);
+  camera.lookAt(look);
+  const w = viewEl.clientWidth, h = viewEl.clientHeight;
+  if (w > 0 && h > 0 && camera.aspect !== w / h) {
+    camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h, false);
+  }
+  renderer.render(scene, camera);
+  drawMap();
+  drawNeedle();
+  paintScore();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+window.ROVER = {
+  rover, cache, stranded, liveScore, finalScore, deliver, reading,
+  get power() { return power; },
+  get cargoDone() { return cargoDone; },
+  get rescueDone() { return rescueDone; },
+  get phase() { return phase; },
+  teleport(x, z) { rover.x = x; rover.z = z; }
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rover's Plan — Moon Rover</title>
+<style>
+  :root {
+    --bg: #14120b;
+    --ink: #f3ead7;
+    --pass: #3f7d4e;
+    --gold: #c8922a;
+    --bad: #9a3b2f;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 15px/1.45 "Segoe UI", system-ui, sans-serif;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  header {
+    display: flex; gap: 16px; align-items: center; padding: 10px 14px;
+    background: #1c1910; border-bottom: 1px solid #3a3424;
+  }
+  header a { color: #cbbfa6; text-decoration: none; font-size: 13px; }
+  h1 { margin: 0; font-size: 16px; letter-spacing: 0.12em; }
+  h1 span { color: #e6b35a; }
+  .sub { color: #cbbfa6; font-size: 13px; }
+  .scorebox { margin-left: auto; min-width: 280px; }
+  .score-row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+  #pct { font-size: 20px; font-weight: 750; font-variant-numeric: tabular-nums; }
+  .meter { position: relative; height: 12px; background: #2a261c; border-radius: 99px; }
+  .meter .fill { height: 100%; width: 0; background: #8a7044; border-radius: 99px; }
+  .meter.pass .fill { background: #7dcea0; }
+  .meter.great .fill { background: linear-gradient(90deg, #7dcea0, #f0c14a); }
+  .tick { position: absolute; top: -3px; width: 2px; height: 18px; background: #fff; }
+  .tick.gold { background: #f0c14a; }
+  main { flex: 1; min-height: 0; display: grid; grid-template-rows: 36% 1fr; }
+  #view { position: relative; background: #0e0c08; min-height: 0; }
+  #view canvas { width: 100%; height: 100%; display: block; }
+  #tag {
+    position: absolute; left: 10px; top: 10px; letter-spacing: 0.14em; font-size: 12px;
+    background: #0008; padding: 4px 8px; border-radius: 6px;
+  }
+  #desk { display: grid; grid-template-columns: 250px 1fr; min-height: 0; background: #1a160f; }
+  #map { width: 100%; height: 100%; display: block; background: #221c12; }
+  #card {
+    margin: 12px; background: #f3ead7; color: #1c160f; border-radius: 14px;
+    padding: 14px 16px; overflow: auto; box-shadow: 0 10px 30px #0006;
+  }
+  #card h2 { margin: 0 0 6px; font-size: 18px; }
+  #card p { margin: 0 0 8px; }
+  .muted { color: #6d6252; }
+  .row, .dirs { display: flex; flex-wrap: wrap; gap: 6px; }
+  button {
+    font: inherit; border-radius: 8px; border: 1px solid #cbbfa2; background: #fffaf0;
+    padding: 8px 12px; cursor: pointer; color: #1c160f;
+  }
+  button.primary { background: #1c160f; color: #f3ead7; border-color: #1c160f; }
+  button:disabled { opacity: 0.45; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; min-width: 140px; }
+  select { font: inherit; padding: 6px; border-radius: 6px; }
+  #log { font-size: 13px; color: #4e463a; }
+  .how { color: #4e463a; font-size: 14px; }
+  #banner { font-weight: 750; }
+  #banner.pass { color: var(--pass); }
+  #banner.great { color: var(--gold); }
+  #banner.fail { color: var(--bad); }
+  .boot-error { padding: 16px; color: #e7a098; }
+  @media (max-width: 800px) {
+    #desk { grid-template-columns: 1fr; grid-template-rows: 160px 1fr; }
+    main { grid-template-rows: 28% 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <a href="../index.html">All versions</a>
+  <div>
+    <h1><span>ROVER'S</span> PLAN</h1>
+    <div class="sub">It proposes. You accept, edit, or override.</div>
+  </div>
+  <div class="scorebox">
+    <div class="score-row"><span id="pct">0%</span><span>COMPLETION · PASS 60 · STRONG 90</span></div>
+    <div class="meter" id="meter"><div class="fill" id="fill"></div><i class="tick" style="left:60%"></i><i class="tick gold" style="left:90%"></i></div>
+  </div>
+</header>
+<main>
+  <div id="view"><div id="tag">ROVER CAM · TURN 1 / 8</div></div>
+  <section id="desk">
+    <canvas id="map"></canvas>
+    <article id="card"></article>
+  </section>
+</main>
+<script type="module">
+const THREE_URL = "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.min.js";
+let THREE;
+try { THREE = await import(THREE_URL); }
+catch (err) {
+  document.body.insertAdjacentHTML("beforeend", '<p class="boot-error">Could not load Three.js r170 from the CDN.</p>');
+  throw err;
+}
+const $ = (id) => document.getElementById(id);
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function makeRand(seed) {
+  let a = seed >>> 0;
+  return function rand() {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function makeNoise(rand) {
+  const perm = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) perm[i] = i;
+  for (let i = 255; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    const tmp = perm[i]; perm[i] = perm[j]; perm[j] = tmp;
+  }
+  const p = new Uint8Array(512);
+  for (let i = 0; i < 512; i++) p[i] = perm[i & 255];
+  const fade = (t) => t * t * t * (t * (t * 6 - 15) + 10);
+  const grad = (h, x, z) => { const hh = h & 3, u = hh < 2 ? x : z, v = hh < 2 ? z : x; return ((hh & 1) ? -u : u) + ((hh & 2) ? -v : v); };
+  return function noise(x, z) {
+    const X = Math.floor(x) & 255, Z = Math.floor(z) & 255, xf = x - Math.floor(x), zf = z - Math.floor(z);
+    const u = fade(xf), v = fade(zf);
+    const aa = p[p[X] + Z], ab = p[p[X] + Z + 1], ba = p[p[X + 1] + Z], bb = p[p[X + 1] + Z + 1];
+    return lerp(lerp(grad(aa, xf, zf), grad(ba, xf - 1, zf), u), lerp(grad(ab, xf, zf - 1), grad(bb, xf - 1, zf - 1), u), v);
+  };
+}
+const rand = makeRand((Date.now() ^ Math.floor(Math.random() * 1e9)) >>> 0);
+const noise = makeNoise(rand);
+function heightAt(x, z) { return noise(x * 0.08, z * 0.08) * 0.7 + noise(x * 0.22, z * 0.22) * 0.2; }
+const POINTS = { ice: 20, mineral: 16, soil: 10, landmark: 4, hazard: 0 };
+const specs = ["ice", "ice", "mineral", "mineral", "soil", "soil", "landmark", "landmark", "hazard", "hazard"];
+const features = [];
+for (let i = 0; i < specs.length; i++) {
+  const ang = (i / specs.length) * Math.PI * 2 + (rand() - 0.5) * 0.35;
+  const radius = 14 + rand() * 6;
+  features.push({
+    kind: specs[i],
+    name: specs[i] === "landmark" ? (i % 2 ? "East Rim" : "West Rim") : specs[i],
+    x: Math.sin(ang) * radius,
+    z: Math.cos(ang) * radius,
+    done: false
+  });
+}
+const rover = { x: 0, z: 0, yaw: 0 };
+let score = 0;
+let accuracy = 0.46;
+let turn = 1;
+const TURNS = 8;
+let phase = "choose";
+let proposal = null;
+let move = null;
+let overridePoint = null;
+const log = [];
+const visited = [];
+
+function dist(a, b) { return Math.hypot(a.x - b.x, a.z - b.z); }
+function compassDeg(from, to) {
+  const deg = Math.atan2(to.x - from.x, -(to.z - from.z)) * 180 / Math.PI;
+  return (deg + 360) % 360;
+}
+function cardinal(deg) {
+  return ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(deg / 45) % 8];
+}
+function pointFrom(headingDeg, distance) {
+  const rad = headingDeg * Math.PI / 180;
+  return { x: rover.x + Math.sin(rad) * distance, z: rover.z - Math.cos(rad) * distance };
+}
+function blurb(kind) {
+  const lines = {
+    ice: ["Cold thermal dip against the regolith.", "The radar return is soft, not a hard stone.", "I would core for ice."],
+    mineral: ["Spectrometer caught a warmer glint.", "The camera shows a gray vein.", "I would scoop for minerals."],
+    soil: ["Camera sees fine, undisturbed soil.", "No strong ice or mineral return.", "A soil scoop looks worth the stop."],
+    landmark: ["High-contrast rim on the mast camera.", "Useful for the sketch, not a sample.", "I would mark it on the map."],
+    hazard: ["Lidar sees a hard obstacle.", "Thermal looks like ordinary rock.", "I want to steer around it."]
+  };
+  return lines[kind];
+}
+function makeProposal() {
+  const open = features.filter((f) => !f.done && f.kind !== "hazard").sort((a, b) => dist(rover, a) - dist(rover, b));
+  const hazards = features.filter((f) => !f.done && f.kind === "hazard");
+  if (!open.length && !hazards.length) return null;
+  if (accuracy < 0.78 && rand() < 0.1) {
+    const ang = rand() * Math.PI * 2;
+    const d = 12 + rand() * 8;
+    const dest = { x: rover.x + Math.sin(ang) * d, z: rover.z + Math.cos(ang) * d };
+    return {
+      dest, action: "sample", guess: "mineral", confidence: 0.28 + rand() * 0.15,
+      lines: ["Faint glint. It may be nothing.", "I cannot separate vein from noise.", "I can sample it if you insist."]
+    };
+  }
+  let target = open[0] || hazards[0];
+  if (hazards.length && rand() < 0.16) target = hazards[Math.floor(rand() * hazards.length)];
+  else if (accuracy < 0.74 && open[1] && rand() < 0.32) target = open[1];
+  const trueDeg = compassDeg(rover, target);
+  const err = (1 - accuracy) * (rand() * 70 - 35);
+  const heading = (trueDeg + err + 360) % 360;
+  const td = dist(rover, target);
+  const distance = clamp(td * (0.78 + rand() * 0.28), 8, 34);
+  const dest = pointFrom(heading, distance);
+  const confidence = clamp(0.34 + accuracy * 0.55 - Math.abs(err) / 140 + rand() * 0.05, 0.22, 0.93);
+  const action = target.kind === "landmark" ? "mark" : target.kind === "hazard" ? "avoid" : "sample";
+  return { dest, action, guess: target.kind, confidence, lines: blurb(target.kind), heading, distance };
+}
+function nearestOpen(x, z, maxKind) {
+  let best = null, bestD = 1e9;
+  for (const f of features) {
+    if (f.done) continue;
+    if (maxKind && f.kind !== maxKind) continue;
+    const d = Math.hypot(f.x - x, f.z - z);
+    if (d < bestD) { best = f; bestD = d; }
+  }
+  return { feature: best, d: bestD };
+}
+function resolve(action, x, z) {
+  const near = nearestOpen(x, z);
+  if (action === "scan") {
+    if (near.feature && near.d < 14) {
+      accuracy = Math.min(0.93, accuracy + 0.42);
+      const deg = compassDeg({ x, z }, near.feature);
+      return "Scan: " + ({
+        ice: "frigid thermal",
+        mineral: "spectral glint",
+        soil: "smooth soil",
+        landmark: "tall rim",
+        hazard: "hard obstacle"
+      })[near.feature.kind] + " toward " + cardinal(deg) + ". Next fix should be tighter.";
+    }
+    accuracy = Math.min(0.7, accuracy + 0.08);
+    return "Scan was quiet. Confidence barely moved.";
+  }
+  if (action !== "scan") accuracy = Math.max(0.42, accuracy - 0.08);
+  if (action === "avoid") {
+    if (near.feature && near.feature.kind === "hazard" && near.d < 6) {
+      near.feature.done = true;
+      return "We gave the rock a wide berth.";
+    }
+    return "Detour done. The sketch did not gain a site.";
+  }
+  if (action === "mark") {
+    if (near.feature && near.feature.kind === "landmark" && near.d < 5.4) {
+      near.feature.done = true;
+      score += 4;
+      visited.push({ x, z, kind: "landmark" });
+      return "Marked " + near.feature.name + " on the sketch. +4%.";
+    }
+    score -= 2;
+    return "Marked empty ground. −2%.";
+  }
+  if (near.feature && near.d < 5.2) {
+    if (near.feature.kind === "hazard") {
+      near.feature.done = true;
+      score -= 8;
+      visited.push({ x, z, kind: "hazard" });
+      return "The tool struck rock. −8%.";
+    }
+    if (near.feature.kind === "landmark") return "That is a landmark. Mark it next time — this stop only looked.";
+    near.feature.done = true;
+    const pts = POINTS[near.feature.kind];
+    score += pts;
+    visited.push({ x, z, kind: near.feature.kind });
+    return "Confirmed " + near.feature.kind + ". +" + pts + "%.";
+  }
+  score -= 2;
+  return "Empty regolith. −2%.";
+}
+function clampScore() { score = clamp(score, 0, 100); }
+function paintScore() {
+  clampScore();
+  $("pct").textContent = score + "%";
+  $("fill").style.width = score + "%";
+  $("meter").className = "meter" + (score >= 90 ? " great" : score >= 60 ? " pass" : "");
+  $("tag").textContent = "ROVER CAM · TURN " + Math.min(turn, TURNS) + " / " + TURNS;
+}
+function remember(text) { log.unshift(text); if (log.length > 4) log.pop(); }
+function cardHTML(body, controls) {
+  $("card").innerHTML = body + controls + '<p class="how">Accept the rover’s plan, edit the heading and the tool, or override with your own point. A scan spends a turn and tightens the next guess. Eight turns. R restarts.</p><div id="log">' + log.map((l) => "· " + l).join("<br>") + "</div>";
+}
+function bind(id, fn) { const el = document.getElementById(id); if (el) el.onclick = fn; }
+function renderChoose() {
+  if (!proposal) { renderDone(); return; }
+  const heading = compassDeg(rover, proposal.dest);
+  const distance = dist(rover, proposal.dest);
+  cardHTML(
+    `<h2>Proposal · ${Math.round(proposal.confidence * 100)}% confidence</h2>
+     <p>${proposal.lines[0]}</p><p>${proposal.lines[1]}</p><p><strong>${proposal.lines[2]}</strong></p>
+     <p class="muted">Head ${cardinal(heading)} (${Math.round(heading)}°) for ${distance.toFixed(0)} m, then ${proposal.action}.</p>`,
+    `<div class="row">
+      <button class="primary" id="accept">Accept</button>
+      <button id="edit">Edit</button>
+      <button id="override">Override</button>
+      <button id="finish">End shift</button>
+    </div>`
+  );
+  bind("accept", () => launch(proposal.dest, proposal.action));
+  bind("edit", renderEdit);
+  bind("override", renderOverride);
+  bind("finish", renderDone);
+}
+function renderEdit() {
+  const heading = compassDeg(rover, proposal.dest);
+  const distance = dist(rover, proposal.dest);
+  cardHTML(
+    `<h2>Edit the plan</h2>
+     <p>Nudge the heading or the distance, and pick the tool. The rover still does not see the whole truth.</p>
+     <div class="row">
+       <label>Heading nudge <span id="nudgeLabel">0°</span><input id="nudge" type="range" min="-50" max="50" value="0"></label>
+       <label>Distance <span id="distLabel">${Math.round(distance)} m</span><input id="dist" type="range" min="50" max="150" value="100"></label>
+       <label>Tool<select id="act"><option>sample</option><option>scan</option><option>mark</option><option>avoid</option></select></label>
+     </div>`,
+    `<div class="row"><button class="primary" id="apply">Send edit</button><button id="back">Back</button></div>`
+  );
+  $("act").value = proposal.action;
+  const sync = () => {
+    $("nudgeLabel").textContent = $("nudge").value + "°";
+    $("distLabel").textContent = Math.round(distance * $("dist").value / 100) + " m";
+  };
+  $("nudge").oninput = sync;
+  $("dist").oninput = sync;
+  bind("apply", () => {
+    const deg = (heading + Number($("nudge").value) + 360) % 360;
+    const dest = pointFrom(deg, distance * Number($("dist").value) / 100);
+    launch(dest, $("act").value);
+  });
+  bind("back", () => { mapOverride = false; renderChoose(); });
+}
+function renderOverride() {
+  overridePoint = null;
+  cardHTML(
+    `<h2>Override</h2>
+     <p>Click the map, or pick a compass point. This ignores the rover’s heading.</p>
+     <div class="dirs" id="dirs"></div>
+     <div class="row">
+       <label>Distance<select id="olen"><option value="12">short 12 m</option><option value="20" selected>medium 20 m</option><option value="32">long 32 m</option></select></label>
+       <label>Tool<select id="oact"><option>sample</option><option>scan</option><option>mark</option><option>avoid</option></select></label>
+     </div>
+     <p id="picked" class="muted">No map point yet. Compass buttons still work.</p>`,
+    `<div class="row"><button class="primary" id="go">Go</button><button id="back">Back</button></div>`
+  );
+  const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+  $("dirs").innerHTML = dirs.map((d) => `<button data-dir="${d}">${d}</button>`).join("");
+  let dir = "N";
+  $("dirs").onclick = (ev) => {
+    const b = ev.target.closest("button");
+    if (!b) return;
+    dir = b.dataset.dir;
+    overridePoint = null;
+    $("picked").textContent = "Compass " + dir + ".";
+  };
+  bind("go", () => {
+    let dest = overridePoint;
+    if (!dest) {
+      const deg = dirs.indexOf(dir) * 45;
+      dest = pointFrom(deg, Number($("olen").value));
+    }
+    launch(dest, $("oact").value);
+  });
+  bind("back", () => { mapOverride = false; renderChoose(); });
+  mapOverride = true;
+}
+let mapOverride = false;
+function launch(dest, action) {
+  if (phase !== "choose") return;
+  mapOverride = false;
+  dest = { x: clamp(dest.x, -40, 40), z: clamp(dest.z, -40, 40) };
+  move = { x: rover.x, z: rover.z, dest, action, t: 0 };
+  rover.yaw = Math.atan2(dest.x - rover.x, dest.z - rover.z);
+  phase = "move";
+  $("card").innerHTML = "<h2>Rolling…</h2><p>The rover is committed for this turn.</p>";
+}
+function renderDone() {
+  phase = "done";
+  clampScore();
+  const cls = score >= 90 ? "great" : score >= 60 ? "pass" : "fail";
+  const title = score >= 90 ? "STRONG PASS" : score >= 60 ? "PASS" : "BELOW THE LINE";
+  $("card").innerHTML = `<h2 id="banner" class="${cls}">${title} ${score}%</h2><p>The shift is over. Ice and minerals were worth the most. A scan before a long drive is how the strong scores happen.</p><button id="restart2">Restart</button><div id="log">${log.map((l) => "· " + l).join("<br>")}</div>`;
+  bind("restart2", () => location.reload());
+  paintScore();
+}
+function finishMove() {
+  const text = resolve(move.action, move.dest.x, move.dest.z);
+  clampScore();
+  remember(text);
+  const fresh = visited[visited.length - 1];
+  if (fresh && !fresh.pinned) { fresh.pinned = true; addPin(fresh); }
+  rover.x = move.dest.x;
+  rover.z = move.dest.z;
+  turn += 1;
+  move = null;
+  if (turn > TURNS || features.filter((f) => !f.done && f.kind !== "hazard").length === 0) {
+    renderDone();
+    return;
+  }
+  proposal = makeProposal();
+  phase = "choose";
+  renderChoose();
+  paintScore();
+}
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a140c);
+scene.fog = new THREE.FogExp2(0x1a140c, 0.02);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 160);
+const viewEl = $("view");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+renderer.shadowMap.enabled = true;
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+viewEl.appendChild(renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xf0e2c4, 0x6a5438, 0.85));
+const sun = new THREE.DirectionalLight(0xfff2d8, 2.3);
+sun.position.set(-20, 40, 16);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.camera.left = -40; sun.shadow.camera.right = 40;
+sun.shadow.camera.top = 40; sun.shadow.camera.bottom = -40;
+sun.shadow.camera.near = 1; sun.shadow.camera.far = 100;
+scene.add(sun);
+{
+  const geo = new THREE.PlaneGeometry(90, 90, 70, 70);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position;
+  const colors = new Float32Array(pos.count * 3);
+  const lo = new THREE.Color(0x6a543c), hi = new THREE.Color(0xd7c4a2);
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i), h = heightAt(x, z);
+    pos.setY(i, h);
+    const col = lo.clone().lerp(hi, clamp(0.35 + h * 0.4, 0, 1));
+    colors[i * 3] = col.r; colors[i * 3 + 1] = col.g; colors[i * 3 + 2] = col.b;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }));
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+}
+function buildRover() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.4, 2), new THREE.MeshStandardMaterial({ color: 0xe6b35a, roughness: 0.45, metalness: 0.25 }));
+  body.position.y = 0.5; body.castShadow = true; g.add(body);
+  const dish = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.08, 12), new THREE.MeshStandardMaterial({ color: 0xf3ead7, metalness: 0.6, roughness: 0.3 }));
+  dish.position.set(0, 1.15, -0.2); g.add(dish);
+  scene.add(g);
+  return g;
+}
+const roverMesh = buildRover();
+const pinGeo = new THREE.SphereGeometry(0.25, 10, 8);
+function addPin(v) {
+  const color = { ice: 0x7ecbff, mineral: 0xe879f9, soil: 0xd7c4a2, landmark: 0xf0c14a, hazard: 0x9a3b2f }[v.kind] || 0xffffff;
+  const m = new THREE.Mesh(pinGeo, new THREE.MeshBasicMaterial({ color }));
+  m.position.set(v.x, heightAt(v.x, v.z) + 0.4, v.z);
+  scene.add(m);
+}
+
+const map = $("map");
+const ctx = map.getContext("2d");
+function worldToMap(x, z, w, h) {
+  return { px: (x / 90 + 0.5) * w, py: (z / 90 + 0.5) * h };
+}
+function drawMap() {
+  const w = map.clientWidth, h = map.clientHeight;
+  if (w < 2 || h < 2) return;
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  if (map.width !== Math.floor(w * dpr) || map.height !== Math.floor(h * dpr)) {
+    map.width = Math.floor(w * dpr); map.height = Math.floor(h * dpr);
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = "#2a2318";
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = "#8a7a5e";
+  ctx.strokeRect(8, 8, w - 16, h - 16);
+  ctx.fillStyle = "#f3ead7";
+  ctx.font = "12px sans-serif";
+  ctx.fillText("N", w / 2 - 4, 18);
+  for (const v of visited) {
+    const p = worldToMap(v.x, v.z, w, h);
+    ctx.fillStyle = "#e6b35a";
+    ctx.fillRect(p.px - 3, p.py - 3, 6, 6);
+  }
+  if (proposal && phase === "choose") {
+    const p = worldToMap(proposal.dest.x, proposal.dest.z, w, h);
+    const r = worldToMap(rover.x, rover.z, w, h);
+    ctx.strokeStyle = "#1c160f";
+    ctx.beginPath(); ctx.moveTo(r.px, r.py); ctx.lineTo(p.px, p.py); ctx.stroke();
+    ctx.fillStyle = "#1c160f";
+    ctx.beginPath(); ctx.arc(p.px, p.py, 4, 0, Math.PI * 2); ctx.fill();
+  }
+  const rp = worldToMap(rover.x, rover.z, w, h);
+  ctx.save();
+  ctx.translate(rp.px, rp.py);
+  ctx.rotate(rover.yaw);
+  ctx.fillStyle = "#fffaf0";
+  ctx.beginPath(); ctx.moveTo(0, 8); ctx.lineTo(5, -6); ctx.lineTo(-5, -6); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+map.addEventListener("pointerdown", (ev) => {
+  if (!mapOverride || phase !== "choose") return;
+  const rect = map.getBoundingClientRect();
+  const mx = (ev.clientX - rect.left) / rect.width;
+  const my = (ev.clientY - rect.top) / rect.height;
+  overridePoint = { x: (mx - 0.5) * 90, z: (my - 0.5) * 90 };
+  const picked = document.getElementById("picked");
+  if (picked) picked.textContent = "Map point set. Press Go.";
+});
+
+const camPos = new THREE.Vector3(8, 10, 12);
+const look = new THREE.Vector3();
+let last = performance.now();
+function frame(t) {
+  const dt = clamp((t - last) / 1000, 0, 0.05);
+  last = t;
+  if (phase === "move" && move) {
+    move.t += dt / 1.15;
+    const k = clamp(move.t, 0, 1);
+    rover.x = lerp(move.x, move.dest.x, k);
+    rover.z = lerp(move.z, move.dest.z, k);
+    if (k >= 1) finishMove();
+  }
+  const y = heightAt(rover.x, rover.z);
+  roverMesh.position.set(rover.x, y, rover.z);
+  roverMesh.rotation.y = rover.yaw;
+  const follow = phase === "move" ? 1 : 0.4;
+  look.lerp(new THREE.Vector3(rover.x, y + 0.6, rover.z), 1 - Math.exp(-dt * 2));
+  camPos.lerp(new THREE.Vector3(rover.x - Math.sin(rover.yaw) * (12 - follow), y + 7, rover.z - Math.cos(rover.yaw) * (12 - follow)), 1 - Math.exp(-dt * 2));
+  camera.position.copy(camPos);
+  camera.lookAt(look);
+  const w = viewEl.clientWidth, h = viewEl.clientHeight;
+  if (w > 0 && h > 0 && camera.aspect !== w / h) {
+    camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h, false);
+  }
+  renderer.render(scene, camera);
+  drawMap();
+  requestAnimationFrame(frame);
+}
+proposal = makeProposal();
+renderChoose();
+paintScore();
+requestAnimationFrame(frame);
+window.addEventListener("keydown", (e) => {
+  if (e.key === "r" || e.key === "R") location.reload();
+  if (phase !== "choose" || !proposal) return;
+  if (e.key === "Enter") launch(proposal.dest, proposal.action);
+  if (e.key === "e" || e.key === "E") renderEdit();
+  if (e.key === "o" || e.key === "O") renderOverride();
+});
+window.ROVER = {
+  get score() { return score; },
+  get phase() { return phase; },
+  get turn() { return turn; },
+  features, rover, launch,
+  accept() { if (proposal) launch(proposal.dest, proposal.action); },
+  scanAhead() {
+    const open = features.filter((f) => !f.done && f.kind !== "hazard").sort((a, b) => dist(rover, a) - dist(rover, b))[0];
+    if (open) launch(open, "scan");
+  }
+};
+</script>
+</body>
+</html>

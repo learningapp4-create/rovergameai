@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dual Link — Moon Rover</title>
+<style>
+  :root {
+    --bg: #120818;
+    --panel: #1b1024;
+    --ink: #f6efe6;
+    --dim: #cbb9d4;
+    --line: #3a2748;
+    --luna: #2ee6d6;
+    --mare: #ff8a3d;
+    --pass: #9dceb0;
+    --gold: #f0c14a;
+    --bad: #ff6b8a;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 15px/1.4 "Segoe UI", system-ui, sans-serif;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  header {
+    display: flex; gap: 16px; align-items: center; padding: 10px 14px;
+    border-bottom: 1px solid var(--line); background: #180c22;
+  }
+  header a { color: var(--dim); text-decoration: none; font-size: 13px; }
+  h1 { margin: 0; font-size: 16px; letter-spacing: 0.14em; }
+  h1 span { color: var(--luna); }
+  .sub { color: var(--dim); font-size: 13px; }
+  .scorebox { margin-left: auto; min-width: 280px; }
+  .score-row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+  #pct { font-size: 20px; font-weight: 750; font-variant-numeric: tabular-nums; }
+  .meter { position: relative; height: 12px; background: #2a1a36; border-radius: 99px; }
+  .meter .fill { height: 100%; width: 0; border-radius: 99px; background: #8d6ea3; }
+  .meter.pass .fill { background: var(--pass); }
+  .meter.great .fill { background: linear-gradient(90deg, var(--pass), var(--gold)); }
+  .tick { position: absolute; top: -3px; width: 2px; height: 18px; background: #fff; }
+  .tick.gold { background: var(--gold); }
+  main { flex: 1; min-height: 0; display: grid; grid-template-columns: 270px 1.1fr 0.9fr; }
+  aside, #mapPane { min-height: 0; }
+  aside {
+    padding: 10px; background: var(--panel); border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; gap: 8px; overflow: auto;
+  }
+  #view { position: relative; min-height: 0; background: #09060f; }
+  #view canvas { width: 100%; height: 100%; display: block; }
+  #mapPane { display: flex; flex-direction: column; background: #140a1c; border-left: 1px solid var(--line); }
+  #map { flex: 1; width: 100%; min-height: 0; cursor: crosshair; display: block; }
+  .card {
+    border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: #140a1e; cursor: pointer;
+  }
+  .card.active.luna { border-color: var(--luna); }
+  .card.active.mare { border-color: var(--mare); }
+  .card b { letter-spacing: 0.08em; }
+  .lunaName { color: var(--luna); }
+  .mareName { color: var(--mare); }
+  button {
+    background: #2a1836; color: var(--ink); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 10px; font: inherit; cursor: pointer;
+  }
+  button:hover { border-color: var(--luna); }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .how, #status { margin: 0; }
+  .how { background: #120818; padding: 8px 10px; border-radius: 8px; }
+  #status { color: var(--dim); min-height: 2.6em; }
+  #clock { font-variant-numeric: tabular-nums; font-size: 18px; }
+  .obj { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; }
+  .obj i { font-style: normal; color: var(--dim); }
+  .obj.done i { color: var(--pass); }
+  #banner {
+    position: absolute; left: 12px; bottom: 12px; max-width: 90%;
+    background: #120818ee; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-weight: 700;
+  }
+  #banner.pass { color: var(--pass); }
+  #banner.great { color: var(--gold); }
+  #banner.fail { color: var(--bad); }
+  .boot-error { padding: 16px; color: var(--bad); }
+  @media (max-width: 980px) {
+    main { grid-template-columns: 1fr; grid-template-rows: auto 32vh 40vh; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <a href="../index.html">All versions</a>
+  <div>
+    <h1><span>DUAL</span> LINK</h1>
+    <div class="sub">Two rovers, one delayed comms line.</div>
+  </div>
+  <div class="scorebox">
+    <div class="score-row"><span id="pct">0%</span><span id="kind">SECURED · PASS 60 · STRONG 90</span></div>
+    <div class="meter" id="meter"><div class="fill" id="fill"></div><i class="tick" style="left:60%"></i><i class="tick gold" style="left:90%"></i></div>
+  </div>
+</header>
+<main>
+  <aside>
+    <div style="display:flex;justify-content:space-between;align-items:baseline"><span>Window</span><span id="clock">2:30</span></div>
+    <div class="card luna active" id="card-luna"><b class="lunaName">LUNA</b><div id="lunaLine">Carrying the cargo.</div></div>
+    <div class="card mare" id="card-mare"><b class="mareName">MARE</b><div id="mareLine">Searching for the probe.</div></div>
+    <div class="obj" id="o-cargo"><span>Deliver cargo</span><i>open</i></div>
+    <div class="obj" id="o-rescue"><span>Rescue probe</span><i>open</i></div>
+    <div class="obj" id="o-link"><span>Talk — share a fix</span><i>0%</i></div>
+    <p id="status">Commands wait on the link. The other rover's marker is where it was, not where it is.</p>
+    <p class="how">Click a rover card or press Tab. Click the map to send that rover — the order is delayed about a second. Far apart, or with the ridge between you, the partner marker lags by a few seconds. H orders both toward a meetup using the picture you have. Stay close for 3 seconds to talk. R restarts.</p>
+    <div class="row">
+      <button id="meet">H Meetup</button>
+      <button id="end">End run</button>
+      <button id="restart">Restart</button>
+    </div>
+  </aside>
+  <div id="view"><div id="banner" hidden></div></div>
+  <div id="mapPane"><canvas id="map"></canvas></div>
+</main>
+<script type="module">
+const THREE_URL = "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.min.js";
+let THREE;
+try { THREE = await import(THREE_URL); }
+catch (err) {
+  document.body.insertAdjacentHTML("beforeend", '<p class="boot-error">Could not load Three.js r170 from the CDN.</p>');
+  throw err;
+}
+const $ = (id) => document.getElementById(id);
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function normAng(d) { while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return d; }
+function makeRand(seed) {
+  let a = seed >>> 0;
+  return function rand() {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function makeNoise(rand) {
+  const perm = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) perm[i] = i;
+  for (let i = 255; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    const tmp = perm[i]; perm[i] = perm[j]; perm[j] = tmp;
+  }
+  const p = new Uint8Array(512);
+  for (let i = 0; i < 512; i++) p[i] = perm[i & 255];
+  const fade = (t) => t * t * t * (t * (t * 6 - 15) + 10);
+  const grad = (h, x, z) => { const hh = h & 3, u = hh < 2 ? x : z, v = hh < 2 ? z : x; return ((hh & 1) ? -u : u) + ((hh & 2) ? -v : v); };
+  return function noise(x, z) {
+    const X = Math.floor(x) & 255, Z = Math.floor(z) & 255, xf = x - Math.floor(x), zf = z - Math.floor(z);
+    const u = fade(xf), v = fade(zf);
+    const aa = p[p[X] + Z], ab = p[p[X] + Z + 1], ba = p[p[X + 1] + Z], bb = p[p[X + 1] + Z + 1];
+    return lerp(lerp(grad(aa, xf, zf), grad(ba, xf - 1, zf), u), lerp(grad(ab, xf, zf - 1), grad(bb, xf - 1, zf - 1), u), v);
+  };
+}
+const rand = makeRand((Date.now() ^ Math.floor(Math.random() * 1e9)) >>> 0);
+const noise = makeNoise(rand);
+const depot = { x: 31, z: 16 };
+const probe = { x: -30, z: 15 };
+const guessAng = rand() * Math.PI * 2;
+const probeGuess = { x: probe.x + Math.cos(guessAng) * 8, z: probe.z + Math.sin(guessAng) * 8 };
+function makeRover(name, x, z, color) {
+  return { name, color, x, z, yaw: 0, tx: x, tz: z, hasTarget: false, pending: null, pendingAt: 0, hist: [], lastPush: -1, speed: 0 };
+}
+const luna = makeRover("LUNA", -32, -8, 0x2ee6d6);
+const mare = makeRover("MARE", 32, -16, 0xff8a3d);
+luna.yaw = Math.atan2(10, -4);
+mare.yaw = Math.atan2(-10, 6);
+let activeName = "LUNA";
+let now = 0;
+let timeLeft = 150;
+let phase = "play";
+let cargoDone = false, rescueDone = false, handshakeDone = false;
+let cargoDwell = 0, rescueDwell = 0, handshakeTime = 0;
+let bestCargo = Math.hypot(luna.x - depot.x, luna.z - depot.z);
+let bestRescue = Math.hypot(mare.x - probe.x, mare.z - probe.z);
+let probeKnown = false;
+let graded = false;
+
+function heightAt(x, z) {
+  let h = (noise(x * 0.08, z * 0.08) * 0.6 + noise(x * 0.2, z * 0.2) * 0.25) * 0.8;
+  if (Math.abs(x) < 6 && z > -24 && z < 8) h += Math.exp(-(x * x) / 7) * 2.6;
+  return h;
+}
+function inRidge(x, z) { return Math.abs(x) < 3.5 && z > -24 && z < 8; }
+function sees(a, b) {
+  for (let i = 0; i <= 12; i++) {
+    const t = i / 12;
+    const x = a.x + (b.x - a.x) * t;
+    const z = a.z + (b.z - a.z) * t;
+    if (Math.abs(x) < 3.3 && z > -24 && z < 8) return false;
+  }
+  return true;
+}
+function linkDelay() {
+  const d = Math.hypot(luna.x - mare.x, luna.z - mare.z);
+  const see = sees(luna, mare);
+  if (see && d < 22) return 0.2;
+  if (see) return 1.25;
+  return 2.6;
+}
+function sampleHist(r, t) {
+  let chosen = r.hist[0] || { x: r.x, z: r.z, yaw: r.yaw };
+  for (const s of r.hist) { if (s.t <= t) chosen = s; else break; }
+  return chosen;
+}
+function active() { return activeName === "LUNA" ? luna : mare; }
+function other() { return activeName === "LUNA" ? mare : luna; }
+function partial(best) {
+  if (best >= 40) return 0;
+  return 28 * (1 - clamp((best - 6) / 34, 0, 1));
+}
+function handshakePoints() { return (handshakeDone ? 1 : clamp(handshakeTime / 3, 0, 1)) * 22; }
+function secured() {
+  return clamp(Math.round((cargoDone ? 34 : 0) + (rescueDone ? 34 : 0) + handshakePoints()), 0, 100);
+}
+function finalScore() {
+  let s = (cargoDone ? 34 : partial(bestCargo)) + (rescueDone ? 34 : partial(bestRescue)) + handshakePoints();
+  if (cargoDone && rescueDone) s += 10 * clamp(timeLeft / 90, 0, 1);
+  return clamp(Math.round(s), 0, 100);
+}
+function say(t) { $("status").textContent = t; }
+function paintScore() {
+  const s = graded ? finalScore() : secured();
+  $("pct").textContent = s + "%";
+  $("kind").textContent = (graded ? "COMPLETION" : "SECURED") + " · PASS 60 · STRONG 90";
+  $("fill").style.width = s + "%";
+  $("meter").className = "meter" + (s >= 90 ? " great" : s >= 60 ? " pass" : "");
+  const m = Math.floor(timeLeft / 60);
+  const sec = Math.floor(timeLeft % 60);
+  $("clock").textContent = m + ":" + String(sec).padStart(2, "0");
+  $("o-cargo").className = "obj" + (cargoDone ? " done" : "");
+  $("o-cargo").querySelector("i").textContent = cargoDone ? "delivered" : "open";
+  $("o-rescue").className = "obj" + (rescueDone ? " done" : "");
+  $("o-rescue").querySelector("i").textContent = rescueDone ? "rescued" : probeKnown ? "in sight" : "searching";
+  $("o-link").className = "obj" + (handshakeDone ? " done" : "");
+  $("o-link").querySelector("i").textContent = handshakeDone ? "linked" : Math.round(clamp(handshakeTime / 3, 0, 1) * 100) + "%";
+  const delay = linkDelay();
+  $("lunaLine").textContent = cargoDone ? "Cargo is at the depot." : (luna.pending ? "Order in flight…" : luna.hasTarget ? "Driving." : "Holding.");
+  $("mareLine").textContent = rescueDone ? "Probe is beaconed." : (mare.pending ? "Order in flight…" : mare.hasTarget ? "Driving." : "Holding.");
+  $("card-luna").className = "card luna" + (activeName === "LUNA" ? " active" : "");
+  $("card-mare").className = "card mare" + (activeName === "MARE" ? " active" : "");
+  if (!graded) say.lastDelay = delay;
+}
+
+function command(r, x, z) {
+  if (phase !== "play") return;
+  r.pending = { x: clamp(x, -38, 38), z: clamp(z, -28, 28) };
+  r.pendingAt = now + 1.05;
+}
+function meetup() {
+  if (phase !== "play") return;
+  const partner = sampleHist(other(), now - linkDelay());
+  const me = active();
+  const mid = { x: (me.x + partner.x) / 2, z: (me.z + partner.z) / 2 };
+  command(luna, mid.x, mid.z);
+  command(mare, mid.x, mid.z);
+  say("Meetup order sent from the picture " + activeName + " has. The link will lag.");
+}
+function selectRover(name) { activeName = name; }
+function endRun() {
+  if (graded) return;
+  phase = "done";
+  graded = true;
+  const s = finalScore();
+  const banner = $("banner");
+  banner.hidden = false;
+  banner.className = s >= 90 ? "great" : s >= 60 ? "pass" : "fail";
+  banner.textContent = (s >= 90 ? "STRONG PASS " : s >= 60 ? "PASS " : "BELOW THE LINE ") + s + "% · cargo " + (cargoDone ? "yes" : "no") + " · rescue " + (rescueDone ? "yes" : "no") + " · link " + (handshakeDone ? "yes" : "no");
+  say("Run graded. Closeness and leftover time are in that percent.");
+}
+function stepRover(r, dt) {
+  if (now - r.lastPush > 0.1) {
+    r.hist.push({ t: now, x: r.x, z: r.z, yaw: r.yaw });
+    r.lastPush = now;
+    while (r.hist.length && now - r.hist[0].t > 6) r.hist.shift();
+  }
+  if (r.pending && now >= r.pendingAt) {
+    r.tx = r.pending.x; r.tz = r.pending.z; r.hasTarget = true; r.pending = null;
+  }
+  if (!r.hasTarget) { r.speed = 0; return; }
+  const dx = r.tx - r.x, dz = r.tz - r.z;
+  const dist = Math.hypot(dx, dz);
+  if (dist < 0.85) { r.hasTarget = false; r.speed = 0; return; }
+  const maxTurn = 2.4 * dt;
+  r.yaw += clamp(normAng(Math.atan2(dx, dz) - r.yaw), -maxTurn, maxTurn);
+  let sp = 9;
+  if (inRidge(r.x, r.z)) sp = 3.1;
+  r.speed = sp;
+  r.x = clamp(r.x + Math.sin(r.yaw) * sp * dt, -38, 38);
+  r.z = clamp(r.z + Math.cos(r.yaw) * sp * dt, -28, 28);
+}
+function step(dt) {
+  if (phase !== "play") return;
+  now += dt;
+  timeLeft = Math.max(0, timeLeft - dt);
+  stepRover(luna, dt);
+  stepRover(mare, dt);
+  bestCargo = Math.min(bestCargo, Math.hypot(luna.x - depot.x, luna.z - depot.z));
+  bestRescue = Math.min(bestRescue, Math.hypot(mare.x - probe.x, mare.z - probe.z));
+  if (Math.hypot(mare.x - probe.x, mare.z - probe.z) < 15) probeKnown = true;
+  const stoppedL = !luna.hasTarget && !luna.pending;
+  if (!cargoDone && stoppedL && Math.hypot(luna.x - depot.x, luna.z - depot.z) < 6) {
+    cargoDwell += dt;
+    if (cargoDwell > 1.15) { cargoDone = true; say("LUNA delivered the cargo."); }
+  } else cargoDwell = 0;
+  const stoppedM = !mare.hasTarget && !mare.pending;
+  if (!rescueDone && stoppedM && Math.hypot(mare.x - probe.x, mare.z - probe.z) < 6) {
+    rescueDwell += dt;
+    if (rescueDwell > 1.15) { rescueDone = true; probeKnown = true; say("MARE lit the rescue beacon."); }
+  } else rescueDwell = 0;
+  const gap = Math.hypot(luna.x - mare.x, luna.z - mare.z);
+  if (!handshakeDone && gap < 11) {
+    handshakeTime += dt;
+    if (handshakeTime >= 3) { handshakeDone = true; probeKnown = true; say("The rovers talked. MARE's probe fix is on both maps."); }
+  } else if (!handshakeDone) handshakeTime = Math.max(0, handshakeTime - dt * 0.45);
+  if (timeLeft <= 0) { say("The window closed."); endRun(); }
+}
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x120818);
+scene.fog = new THREE.FogExp2(0x120818, 0.018);
+const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 220);
+const viewEl = $("view");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.12;
+renderer.shadowMap.enabled = true;
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+viewEl.appendChild(renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xd7c6ea, 0x3a2438, 0.75));
+const sun = new THREE.DirectionalLight(0xfff0dc, 2.4);
+sun.position.set(30, 48, 8);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.camera.left = -50; sun.shadow.camera.right = 50;
+sun.shadow.camera.top = 40; sun.shadow.camera.bottom = -40;
+sun.shadow.camera.near = 1; sun.shadow.camera.far = 140;
+sun.shadow.bias = -0.0006;
+scene.add(sun);
+{
+  const geo = new THREE.PlaneGeometry(84, 64, 90, 70);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position;
+  const colors = new Float32Array(pos.count * 3);
+  const lo = new THREE.Color(0x2a2038), hi = new THREE.Color(0x8d7c96);
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i), h = heightAt(x, z);
+    pos.setY(i, h);
+    const col = lo.clone().lerp(hi, clamp(0.25 + h * 0.22, 0, 1));
+    colors[i * 3] = col.r; colors[i * 3 + 1] = col.g; colors[i * 3 + 2] = col.b;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94 }));
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+}
+function buildRover(color) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.42, 2.1), new THREE.MeshStandardMaterial({ color, roughness: 0.45, metalness: 0.35 }));
+  body.position.y = 0.55; body.castShadow = true; g.add(body);
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 1.2, 8), new THREE.MeshStandardMaterial({ color: 0xf4efe6, metalness: 0.5, roughness: 0.3 }));
+  mast.position.set(0, 1.3, -0.4); g.add(mast);
+  const wheelGeo = new THREE.CylinderGeometry(0.26, 0.26, 0.22, 10);
+  wheelGeo.rotateZ(Math.PI / 2);
+  const wheels = [];
+  [[-0.7, -0.65], [0.7, -0.65], [-0.7, 0.15], [0.7, 0.15], [-0.7, 0.75], [0.7, 0.75]].forEach(([x, z]) => {
+    const w = new THREE.Mesh(wheelGeo, new THREE.MeshStandardMaterial({ color: 0x1a121c, roughness: 1 }));
+    w.position.set(x, 0.28, z); g.add(w); wheels.push(w);
+  });
+  g.userData.wheels = wheels;
+  scene.add(g);
+  return g;
+}
+const lunaMesh = buildRover(0x2ee6d6);
+const mareMesh = buildRover(0xff8a3d);
+const depotMesh = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.8, 2.2), new THREE.MeshStandardMaterial({ color: 0xf0c14a, roughness: 0.6 }));
+depotMesh.position.set(depot.x, heightAt(depot.x, depot.z) + 0.4, depot.z);
+depotMesh.castShadow = true;
+scene.add(depotMesh);
+const probeMesh = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.4, 8), new THREE.MeshStandardMaterial({ color: 0xff6b8a, roughness: 0.4, metalness: 0.2 }));
+probeMesh.position.set(probe.x, heightAt(probe.x, probe.z) + 0.7, probe.z);
+probeMesh.visible = false;
+scene.add(probeMesh);
+
+const MAP_W = 84, MAP_H = 64;
+const map = $("map");
+const ctx = map.getContext("2d");
+function worldToMap(x, z, w, h) {
+  return { px: ((x + 42) / MAP_W) * w, py: ((z + 32) / MAP_H) * h };
+}
+function drawZone(x, z, radius, color, w, h) {
+  const p = worldToMap(x, z, w, h);
+  ctx.save();
+  ctx.translate(p.px, p.py);
+  ctx.scale(w / MAP_W, h / MAP_H);
+  ctx.beginPath();
+  ctx.arc(0, 0, radius, 0, Math.PI * 2);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = MAP_W / w * 1.5;
+  ctx.stroke();
+  ctx.restore();
+}
+function drawIcon(x, y, yaw, color) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(yaw);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(0, 9); ctx.lineTo(6, -7); ctx.lineTo(-6, -7); ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+function drawMap() {
+  const w = map.clientWidth, h = map.clientHeight;
+  if (w < 2 || h < 2) return;
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  if (map.width !== Math.floor(w * dpr) || map.height !== Math.floor(h * dpr)) {
+    map.width = Math.floor(w * dpr); map.height = Math.floor(h * dpr);
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = "#1a1024";
+  ctx.fillRect(0, 0, w, h);
+  const ridge = worldToMap(-3.4, -24, w, h);
+  const ridge2 = worldToMap(3.4, 8, w, h);
+  ctx.fillStyle = "#3a2450";
+  ctx.fillRect(ridge.px, ridge.py, ridge2.px - ridge.px, ridge2.py - ridge.py);
+  ctx.fillStyle = "#243044";
+  const gapA = worldToMap(-5, 8, w, h);
+  const gapB = worldToMap(5, 20, w, h);
+  ctx.fillRect(gapA.px, gapA.py, gapB.px - gapA.px, gapB.py - gapA.py);
+  drawZone(depot.x, depot.z, 6, "#f0c14a", w, h);
+  const dp = worldToMap(depot.x, depot.z, w, h);
+  ctx.fillStyle = "#f0c14a";
+  ctx.fillRect(dp.px - 4, dp.py - 4, 8, 8);
+  const showProbe = probeKnown || handshakeDone || (activeName === "MARE" && Math.hypot(mare.x - probe.x, mare.z - probe.z) < 26);
+  if (probeKnown || handshakeDone) {
+    drawZone(probe.x, probe.z, 6, "#ff6b8a", w, h);
+    const pp = worldToMap(probe.x, probe.z, w, h);
+    ctx.fillStyle = "#ff6b8a";
+    ctx.beginPath(); ctx.arc(pp.px, pp.py, 5, 0, Math.PI * 2); ctx.fill();
+  } else if (activeName === "MARE") {
+    drawZone(probeGuess.x, probeGuess.z, 12, "rgba(255,107,138,0.8)", w, h);
+    if (showProbe) {
+      const from = worldToMap(mare.x, mare.z, w, h);
+      const ang = Math.atan2(probe.x - mare.x, probe.z - mare.z);
+      ctx.strokeStyle = "rgba(255,107,138,0.55)";
+      ctx.beginPath();
+      ctx.moveTo(from.px, from.py);
+      ctx.lineTo(from.px + Math.sin(ang) * 46, from.py + Math.cos(ang) * 46);
+      ctx.stroke();
+    }
+  }
+  for (const r of [luna, mare]) {
+    if (r.pending) {
+      const a = worldToMap(r.x, r.z, w, h);
+      const b = worldToMap(r.pending.x, r.pending.z, w, h);
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = r.name === "LUNA" ? "#2ee6d6" : "#ff8a3d";
+      ctx.beginPath(); ctx.moveTo(a.px, a.py); ctx.lineTo(b.px, b.py); ctx.stroke();
+      ctx.setLineDash([]);
+    } else if (r.hasTarget) {
+      const a = worldToMap(r.x, r.z, w, h);
+      const b = worldToMap(r.tx, r.tz, w, h);
+      ctx.strokeStyle = r.name === "LUNA" ? "#2ee6d6" : "#ff8a3d";
+      ctx.beginPath(); ctx.moveTo(a.px, a.py); ctx.lineTo(b.px, b.py); ctx.stroke();
+    }
+  }
+  const delay = linkDelay();
+  const me = active();
+  const ghost = sampleHist(other(), now - delay);
+  const meP = worldToMap(me.x, me.z, w, h);
+  const ghP = worldToMap(ghost.x, ghost.z, w, h);
+  drawIcon(ghP.px, ghP.py, ghost.yaw, other().name === "LUNA" ? "rgba(46,230,214,0.45)" : "rgba(255,138,61,0.45)");
+  drawIcon(meP.px, meP.py, me.yaw, me.name === "LUNA" ? "#2ee6d6" : "#ff8a3d");
+  ctx.fillStyle = "#f6efe6";
+  ctx.font = "12px sans-serif";
+  ctx.fillText(delay < 0.5 ? "LINK LIVE" : "LINK " + delay.toFixed(1) + "s STALE", 8, 16);
+}
+map.addEventListener("pointerdown", (ev) => {
+  if (phase !== "play") return;
+  const rect = map.getBoundingClientRect();
+  const mx = (ev.clientX - rect.left) / rect.width;
+  const my = (ev.clientY - rect.top) / rect.height;
+  const x = mx * MAP_W - 42;
+  const z = my * MAP_H - 32;
+  const delay = linkDelay();
+  const ghost = sampleHist(other(), now - delay);
+  if (Math.hypot(x - ghost.x, z - ghost.z) < 3.2) { selectRover(other().name); return; }
+  command(active(), x, z);
+  say(activeName + " order queued. It rolls in about a second.");
+});
+$("card-luna").onclick = () => selectRover("LUNA");
+$("card-mare").onclick = () => selectRover("MARE");
+$("meet").onclick = meetup;
+$("end").onclick = endRun;
+$("restart").onclick = () => location.reload();
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Tab") { e.preventDefault(); selectRover(activeName === "LUNA" ? "MARE" : "LUNA"); }
+  else if (e.key === "h" || e.key === "H") meetup();
+  else if (e.key === "Enter") endRun();
+  else if (e.key === "r" || e.key === "R") location.reload();
+});
+
+function placeMesh(mesh, r, ghosted) {
+  const pose = ghosted ? sampleHist(r, now - linkDelay()) : r;
+  mesh.position.set(pose.x, heightAt(pose.x, pose.z), pose.z);
+  mesh.rotation.y = pose.yaw;
+  mesh.traverse((obj) => {
+    if (obj.material && obj.material.transparent !== undefined && obj !== probeMesh) {
+      obj.material.opacity = ghosted && linkDelay() > 0.6 ? 0.4 : 1;
+      obj.material.transparent = true;
+    }
+  });
+  for (const w of mesh.userData.wheels) w.rotation.x += r.speed * 0.016;
+}
+const camPos = new THREE.Vector3(luna.x - 12, 16, luna.z - 12);
+const look = new THREE.Vector3();
+let last = performance.now();
+function frame(t) {
+  const dt = clamp((t - last) / 1000, 0, 0.05);
+  last = t;
+  step(dt);
+  probeMesh.visible = probeKnown || Math.hypot(active().x - probe.x, active().z - probe.z) < 18;
+  placeMesh(lunaMesh, luna, activeName !== "LUNA");
+  placeMesh(mareMesh, mare, activeName !== "MARE");
+  const me = active();
+  const y = heightAt(me.x, me.z);
+  const k = 1 - Math.exp(-dt * 2.2);
+  look.lerp(new THREE.Vector3(me.x, y + 1, me.z), k);
+  camPos.lerp(new THREE.Vector3(me.x - Math.sin(me.yaw) * 14, y + 8.5, me.z - Math.cos(me.yaw) * 14), k);
+  camera.position.copy(camPos);
+  camera.lookAt(look);
+  const w = viewEl.clientWidth, h = viewEl.clientHeight;
+  if (w > 0 && h > 0 && camera.aspect !== w / h) {
+    camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h, false);
+  }
+  renderer.render(scene, camera);
+  drawMap();
+  paintScore();
+  requestAnimationFrame(frame);
+}
+paintScore();
+requestAnimationFrame(frame);
+window.ROVER = {
+  luna, mare, depot, probe, secured, finalScore,
+  command, meetup, selectRover, endRun,
+  get phase() { return phase; },
+  get cargoDone() { return cargoDone; },
+  get rescueDone() { return rescueDone; },
+  get handshakeDone() { return handshakeDone; },
+  get timeLeft() { return timeLeft; },
+  force() { cargoDone = true; rescueDone = true; handshakeDone = true; handshakeTime = 3; }
+};
+</script>
+</body>
+</html>

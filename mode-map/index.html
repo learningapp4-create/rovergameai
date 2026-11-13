@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Layer Map — Moon Rover</title>
+<style>
+  :root {
+    --bg: #10141c;
+    --panel: #171d27;
+    --ink: #e8e3d8;
+    --dim: #a9b0ba;
+    --line: #2c3544;
+    --pass: #9dceb0;
+    --gold: #f0c14a;
+    --bad: #e07a72;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 15px/1.4 "Segoe UI", system-ui, sans-serif;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  header {
+    display: flex; gap: 16px; align-items: center;
+    padding: 10px 14px; border-bottom: 1px solid var(--line); background: #141a24;
+  }
+  header a { color: var(--dim); text-decoration: none; font-size: 13px; }
+  h1 { font-size: 16px; margin: 0; letter-spacing: 0.16em; font-weight: 650; }
+  h1 span { color: #d5dde6; }
+  .sub { color: var(--dim); font-size: 13px; }
+  .scorebox { margin-left: auto; min-width: 300px; }
+  .score-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+  #kind { font-size: 12px; letter-spacing: 0.12em; color: var(--dim); }
+  #pct { font-size: 20px; font-weight: 750; font-variant-numeric: tabular-nums; }
+  .meter { position: relative; height: 12px; background: #242c3a; border-radius: 99px; }
+  .meter .fill { height: 100%; width: 0; border-radius: 99px; background: #8d97a6; }
+  .meter.pass .fill { background: var(--pass); }
+  .meter.great .fill { background: linear-gradient(90deg, var(--pass), var(--gold)); }
+  .tick { position: absolute; top: -3px; width: 2px; height: 18px; background: #fff; }
+  .tick.gold { background: var(--gold); }
+  main { flex: 1; min-height: 0; display: grid; grid-template-columns: 1.2fr 0.8fr; }
+  #mapPane { position: relative; min-height: 0; display: flex; flex-direction: column; }
+  #map { flex: 1; width: 100%; min-height: 0; display: block; background: #0e131b; cursor: crosshair; }
+  #readout {
+    display: flex; justify-content: space-between; gap: 12px;
+    padding: 8px 12px; background: #121820; border-top: 1px solid var(--line);
+  }
+  #readout strong { font-size: 18px; font-weight: 650; }
+  aside {
+    display: flex; flex-direction: column; gap: 8px; padding: 10px;
+    background: var(--panel); border-left: 1px solid var(--line); min-height: 0; overflow: auto;
+  }
+  #view { position: relative; height: 210px; border-radius: 12px; overflow: hidden; border: 3px solid #c5ced6; background: #07090d; }
+  #view canvas { width: 100%; height: 100%; display: block; }
+  #view .tag {
+    position: absolute; left: 8px; top: 8px; font-size: 12px; letter-spacing: 0.14em;
+    background: #0008; padding: 3px 6px; border-radius: 6px;
+  }
+  #view.thermal { border-color: #e23d3d; }
+  #view.mineral { border-color: #e879f9; }
+  #view.ice { border-color: #67e8f9; }
+  #view.relief { border-color: #c5ced6; }
+  .layers, .flags, .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  button {
+    background: #222a38; color: var(--ink); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 10px; font: inherit; cursor: pointer;
+  }
+  button:hover { filter: brightness(1.1); }
+  button[aria-pressed="true"] { color: #14181f; font-weight: 750; }
+  #b-relief[aria-pressed="true"] { background: #d5dde6; }
+  #b-thermal[aria-pressed="true"] { background: #e23d3d; color: #fff; }
+  #b-mineral[aria-pressed="true"] { background: #e879f9; }
+  #b-ice[aria-pressed="true"] { background: #67e8f9; }
+  .how, #status { margin: 0; }
+  .how { background: #121820; border-radius: 8px; padding: 8px 10px; }
+  #status { color: var(--dim); min-height: 2.4em; }
+  #energy { height: 8px; background: #242c3a; border-radius: 99px; }
+  #energy span { display: block; height: 100%; width: 100%; background: #d5dde6; border-radius: 99px; }
+  #banner {
+    position: absolute; left: 12px; bottom: 64px; max-width: 70%;
+    padding: 10px 12px; background: #121820ee; border: 1px solid var(--line); border-radius: 10px; font-weight: 700;
+  }
+  #banner.pass { color: var(--pass); }
+  #banner.great { color: var(--gold); }
+  #banner.fail { color: var(--bad); }
+  .boot-error { padding: 16px; color: var(--bad); }
+  @media (max-width: 860px) {
+    main { grid-template-columns: 1fr; grid-template-rows: 46vh 1fr; }
+    #view { height: 160px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <a href="../index.html">All versions</a>
+  <div>
+    <h1><span>LAYER</span> MAP</h1>
+    <div class="sub">Each sensor hides what the others show.</div>
+  </div>
+  <div class="scorebox">
+    <div class="score-row"><span id="pct">0%</span><span id="kind">CLAIMED · PASS 60 · STRONG 90</span></div>
+    <div class="meter" id="meter"><div class="fill" id="fill"></div><i class="tick" style="left:60%"></i><i class="tick gold" style="left:90%"></i></div>
+  </div>
+</header>
+<main>
+  <section id="mapPane">
+    <canvas id="map"></canvas>
+    <div id="readout"><div><span id="modeLabel">RELIEF</span><br><strong id="words">no reading</strong></div><div>Drive energy<br><strong id="energyNum">120</strong></div></div>
+    <div id="banner" hidden></div>
+  </section>
+  <aside>
+    <div class="layers">
+      <button id="b-relief" aria-pressed="true">1 Relief</button>
+      <button id="b-thermal">2 Thermal</button>
+      <button id="b-mineral">3 Mineral</button>
+      <button id="b-ice">4 Ice radar</button>
+    </div>
+    <div id="view" class="relief"><div class="tag" id="viewTag">RELIEF VISOR</div></div>
+    <div id="energy"><span id="energyFill"></span></div>
+    <div class="flags">
+      <button id="f-water">Z Mark water</button>
+      <button id="f-mineral">X Mark mineral</button>
+      <button id="f-hazard">C Mark hazard</button>
+      <button id="f-temp">T Log temperature</button>
+    </div>
+    <p id="status">Paint the map by driving. Only the active layer records.</p>
+    <p class="how">WASD or arrows drive. Click the map to cruise. Switch layers: relief shows blockages, thermal shows heat, mineral shows veins, ice radar shows returns. Cold plus a bright radar return can be ice or a buried rock — relief tells them apart. Nine marks. End the survey to grade the claims. R restarts.</p>
+    <div class="row">
+      <button id="end">End survey</button>
+      <button id="restart">Restart</button>
+    </div>
+  </aside>
+</main>
+<script type="module">
+const THREE_URL = "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.min.js";
+let THREE;
+try { THREE = await import(THREE_URL); }
+catch (err) {
+  document.body.insertAdjacentHTML("beforeend", '<p class="boot-error">Could not load Three.js r170 from the CDN.</p>');
+  throw err;
+}
+const $ = (id) => document.getElementById(id);
+const N = 12, CELL = 5, HALF = 30, WORLD = 60;
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function normAng(d) { while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return d; }
+function makeRand(seed) {
+  let a = seed >>> 0;
+  return function rand() {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function makeNoise(rand) {
+  const perm = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) perm[i] = i;
+  for (let i = 255; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    const tmp = perm[i]; perm[i] = perm[j]; perm[j] = tmp;
+  }
+  const p = new Uint8Array(512);
+  for (let i = 0; i < 512; i++) p[i] = perm[i & 255];
+  const fade = (t) => t * t * t * (t * (t * 6 - 15) + 10);
+  const grad = (h, x, z) => {
+    const hh = h & 3, u = hh < 2 ? x : z, v = hh < 2 ? z : x;
+    return ((hh & 1) ? -u : u) + ((hh & 2) ? -v : v);
+  };
+  return function noise(x, z) {
+    const X = Math.floor(x) & 255, Z = Math.floor(z) & 255;
+    const xf = x - Math.floor(x), zf = z - Math.floor(z);
+    const u = fade(xf), v = fade(zf);
+    const aa = p[p[X] + Z], ab = p[p[X] + Z + 1], ba = p[p[X + 1] + Z], bb = p[p[X + 1] + Z + 1];
+    return lerp(lerp(grad(aa, xf, zf), grad(ba, xf - 1, zf), u), lerp(grad(ab, xf, zf - 1), grad(bb, xf - 1, zf - 1), u), v);
+  };
+}
+const rand = makeRand((Date.now() ^ Math.floor(Math.random() * 1e9)) >>> 0);
+const noise = makeNoise(rand);
+const fbm = (x, z) => noise(x, z) * 0.7 + noise(x * 2 + 3, z * 2 - 2) * 0.3;
+function heightAt(x, z) { return fbm(x * 0.07, z * 0.07) * 1.15; }
+function cellAt(x, z) {
+  return clamp(Math.floor((z + HALF) / CELL), 0, N - 1) * N + clamp(Math.floor((x + HALF) / CELL), 0, N - 1);
+}
+function cellCenter(i) {
+  return { x: -HALF + ((i % N) + 0.5) * CELL, z: -HALF + ((i / N | 0) + 0.5) * CELL };
+}
+function pickCells(n, taken) {
+  const out = [];
+  let guard = 0;
+  while (out.length < n && guard++ < 2000) {
+    const ix = 1 + Math.floor(rand() * (N - 2));
+    const iz = 1 + Math.floor(rand() * (N - 2));
+    const i = iz * N + ix;
+    if (taken.has(i) || out.includes(i)) continue;
+    if ([...taken, ...out].some((j) => Math.hypot((j % N) - ix, ((j / N) | 0) - iz) < 2.05)) continue;
+    out.push(i);
+  }
+  guard = 0;
+  while (out.length < n && guard++ < 500) {
+    const i = Math.floor(rand() * N * N);
+    if (taken.has(i) || out.includes(i)) continue;
+    out.push(i);
+  }
+  return out;
+}
+const taken = new Set();
+const startI = 6 * N + 5;
+for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) taken.add(startI + dz * N + dx);
+const waterI = pickCells(3, taken); waterI.forEach((i) => taken.add(i));
+const decoyI = pickCells(2, taken); decoyI.forEach((i) => taken.add(i));
+const mineralI = pickCells(3, taken); mineralI.forEach((i) => taken.add(i));
+const hazardI = pickCells(4, taken); hazardI.forEach((i) => taken.add(i));
+const beaconI = pickCells(3, taken);
+const beaconTemps = [0.12, 0.5, 0.86];
+const cells = [];
+for (let i = 0; i < N * N; i++) {
+  cells.push({
+    temp: 0.42 + rand() * 0.16,
+    mineral: rand() * 0.14,
+    ice: rand() * 0.1,
+    rough: rand() * 0.22,
+    hazard: false,
+    water: false,
+    mineralHot: false,
+    decoy: false
+  });
+}
+waterI.forEach((i) => Object.assign(cells[i], { temp: 0.05 + rand() * 0.04, ice: 0.9 + rand() * 0.08, mineral: 0.04, rough: 0.32, water: true }));
+decoyI.forEach((i) => Object.assign(cells[i], { temp: 0.09 + rand() * 0.05, ice: 0.72 + rand() * 0.12, mineral: 0.08, rough: 1, hazard: true, decoy: true }));
+mineralI.forEach((i) => Object.assign(cells[i], { mineral: 0.92 + rand() * 0.08, temp: 0.6 + rand() * 0.08, ice: 0.05, mineralHot: true }));
+hazardI.forEach((i) => Object.assign(cells[i], { hazard: true, rough: 1, temp: 0.46 + rand() * 0.1, ice: 0.12, mineral: 0.1 }));
+const beacons = beaconI.map((i, n) => {
+  cells[i].temp = beaconTemps[n];
+  return { i, logged: false, name: "Beacon " + (n + 1) };
+});
+const obs = { relief: Array(N * N).fill(null), thermal: Array(N * N).fill(null), mineral: Array(N * N).fill(null), ice: Array(N * N).fill(null) };
+const flags = [];
+let mode = "relief";
+let phase = "play";
+let graded = false;
+let energy = 120;
+let throttle = 0;
+const keys = {};
+let goal = null;
+const start = cellCenter(startI);
+const rover = { x: start.x, z: start.z, yaw: 0, speed: 0 };
+
+function reading(cell, which) {
+  if (which === "relief") return cell.hazard ? 1 : cell.rough;
+  if (which === "thermal") return cell.temp;
+  if (which === "mineral") return cell.mineral;
+  return cell.ice;
+}
+function words(which, v) {
+  if (v == null) return "no reading";
+  if (which === "thermal") return v < 0.18 ? "frigid" : v < 0.34 ? "cold" : v < 0.58 ? "mild" : v < 0.75 ? "warm" : "hot";
+  if (which === "mineral") return v < 0.25 ? "trace" : v < 0.55 ? "weak band" : "strong band";
+  if (which === "ice") return v < 0.25 ? "quiet" : v < 0.62 ? "soft return" : "bright return";
+  return v > 0.8 ? "blocked" : v > 0.4 ? "rough" : "clear";
+}
+function claimed() {
+  let s = beacons.filter((b) => b.logged).length * 4;
+  for (const f of flags) s += f.type === "water" ? 16 : f.type === "mineral" ? 14 : 4;
+  return clamp(s, 0, 140);
+}
+function gradedScore() {
+  let s = 0;
+  for (const f of flags) {
+    const c = cells[f.i];
+    if (f.type === "water") s += c.water ? 16 : -10;
+    else if (f.type === "mineral") s += c.mineralHot ? 14 : -8;
+    else s += c.hazard ? 4 : -4;
+  }
+  s += beacons.filter((b) => b.logged).length * 4;
+  return clamp(Math.round(s), 0, 100);
+}
+function say(t) { $("status").textContent = t; }
+function paintScore() {
+  const real = graded ? gradedScore() : null;
+  const s = graded ? real : Math.min(100, claimed());
+  $("pct").textContent = s + "%";
+  $("kind").textContent = graded ? "COMPLETION · PASS 60 · STRONG 90" : "CLAIMED IF TRUE · PASS 60 · STRONG 90";
+  $("fill").style.width = s + "%";
+  $("meter").className = "meter" + (s >= 90 ? " great" : s >= 60 ? " pass" : "");
+  $("energyNum").textContent = Math.max(0, Math.ceil(energy));
+  $("energyFill").style.width = clamp(energy / 120, 0, 1) * 100 + "%";
+}
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0c1016);
+scene.fog = new THREE.FogExp2(0x0c1016, 0.02);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 180);
+const viewEl = $("view");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+renderer.shadowMap.enabled = true;
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+viewEl.appendChild(renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xd5dde8, 0x3e4654, 0.8));
+const sun = new THREE.DirectionalLight(0xfff4e8, 2.3);
+sun.position.set(24, 40, 10);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.camera.left = -40; sun.shadow.camera.right = 40;
+sun.shadow.camera.top = 40; sun.shadow.camera.bottom = -40;
+sun.shadow.camera.near = 1; sun.shadow.camera.far = 120;
+sun.shadow.bias = -0.0005;
+scene.add(sun);
+{
+  const segs = 80;
+  const geo = new THREE.PlaneGeometry(WORLD, WORLD, segs, segs);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position;
+  const colors = new Float32Array(pos.count * 3);
+  const lo = new THREE.Color(0x3a414c), hi = new THREE.Color(0xc2bfb6);
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i), h = heightAt(x, z);
+    pos.setY(i, h);
+    const col = lo.clone().lerp(hi, clamp(h * 0.35 + 0.45, 0, 1));
+    colors[i * 3] = col.r; colors[i * 3 + 1] = col.g; colors[i * 3 + 2] = col.b;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 }));
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+}
+function buildRover() {
+  const g = new THREE.Group();
+  const shell = new THREE.MeshStandardMaterial({ color: 0x1e2836, roughness: 0.45, metalness: 0.35 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.4, 2.05), shell);
+  body.position.y = 0.52; body.castShadow = true; g.add(body);
+  const nose = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.22, 0.4), new THREE.MeshStandardMaterial({ color: 0x8aa0b8, metalness: 0.4, roughness: 0.4 }));
+  nose.position.set(0, 0.78, 0.7); g.add(nose);
+  const wheelGeo = new THREE.CylinderGeometry(0.26, 0.26, 0.22, 10);
+  wheelGeo.rotateZ(Math.PI / 2);
+  const wheels = [];
+  [[-0.68, -0.65], [0.68, -0.65], [-0.68, 0.1], [0.68, 0.1], [-0.68, 0.72], [0.68, 0.72]].forEach(([x, z]) => {
+    const w = new THREE.Mesh(wheelGeo, new THREE.MeshStandardMaterial({ color: 0x1c2128, roughness: 1 }));
+    w.position.set(x, 0.26, z); w.castShadow = true; g.add(w); wheels.push(w);
+  });
+  g.userData.wheels = wheels;
+  scene.add(g);
+  return g;
+}
+const roverMesh = buildRover();
+const beaconMeshes = beacons.map((b) => {
+  const c = cellCenter(b.i);
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 2.2, 6), new THREE.MeshStandardMaterial({ color: 0xe8e3d8, metalness: 0.5, roughness: 0.35 }));
+  pole.position.y = 1.1; pole.castShadow = true; g.add(pole);
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), new THREE.MeshBasicMaterial({ color: 0xf2d48a }));
+  bulb.position.y = 2.25; g.add(bulb);
+  g.position.set(c.x, heightAt(c.x, c.z), c.z);
+  scene.add(g);
+  return g;
+});
+
+function sense() {
+  for (let i = 0; i < cells.length; i++) {
+    const c = cellCenter(i);
+    if (Math.hypot(c.x - rover.x, c.z - rover.z) <= 7) obs[mode][i] = reading(cells[i], mode);
+  }
+}
+function setMode(next) {
+  if (phase !== "play") return;
+  mode = next;
+  for (const name of ["relief", "thermal", "mineral", "ice"]) {
+    $("b-" + name).setAttribute("aria-pressed", name === mode ? "true" : "false");
+  }
+  viewEl.className = mode;
+  const labels = { relief: "RELIEF", thermal: "THERMAL", mineral: "MINERAL", ice: "ICE RADAR" };
+  $("viewTag").textContent = labels[mode] + " VISOR";
+  $("modeLabel").textContent = labels[mode];
+}
+function markFlag(type) {
+  if (phase !== "play") return;
+  const i = cellAt(rover.x, rover.z);
+  const existing = flags.find((f) => f.i === i);
+  if (existing) { existing.type = type; say("Mark updated to " + type + "."); return; }
+  if (flags.length >= 9) { say("Nine marks is the notebook limit."); return; }
+  flags.push({ i, type });
+  say("Marked this cell as " + type + ". " + flags.length + " of 9.");
+}
+function logTemp() {
+  if (phase !== "play") return;
+  const i = cellAt(rover.x, rover.z);
+  const b = beacons.find((item) => item.i === i);
+  if (!b) { say("Stand on a beacon mast to log temperature."); return; }
+  if (mode !== "thermal") { say("Thermal layer has to be active to log the mast."); return; }
+  if (b.logged) { say(b.name + " is already on the temperature map."); return; }
+  b.logged = true;
+  say(b.name + " logged as " + words("thermal", cells[i].temp) + ".");
+}
+function grade() {
+  if (phase !== "play") return;
+  phase = "done";
+  graded = true;
+  goal = null;
+  const s = gradedScore();
+  const waterHit = flags.filter((f) => f.type === "water" && cells[f.i].water).length;
+  const minHit = flags.filter((f) => f.type === "mineral" && cells[f.i].mineralHot).length;
+  const hazHit = flags.filter((f) => f.type === "hazard" && cells[f.i].hazard).length;
+  const temps = beacons.filter((b) => b.logged).length;
+  const banner = $("banner");
+  banner.hidden = false;
+  banner.className = s >= 90 ? "great" : s >= 60 ? "pass" : "fail";
+  banner.textContent = (s >= 90 ? "STRONG PASS " : s >= 60 ? "PASS " : "BELOW THE LINE ") + s + "% · water " + waterHit + "/3 · minerals " + minHit + "/3 · hazards " + hazHit + "/6 · temps " + temps + "/3";
+  say(s >= 60 ? "Survey graded. The claims that were wrong were subtracted." : "Survey graded under the 60% line. Wrong marks cost points.");
+}
+function step(dt) {
+  if (phase !== "play") { rover.speed = 0; return; }
+  let turn = 0;
+  if (keys["a"] || keys["arrowleft"]) turn += 1;
+  if (keys["d"] || keys["arrowright"]) turn -= 1;
+  if (keys["w"] || keys["arrowup"]) throttle = Math.min(1, throttle + dt * 1.8);
+  else if (keys["s"] || keys["arrowdown"]) throttle = Math.max(-0.45, throttle - dt * 1.8);
+  else if (!goal) throttle *= Math.pow(0.05, dt);
+  if (goal) {
+    const dx = goal.x - rover.x, dz = goal.z - rover.z;
+    if (Math.hypot(dx, dz) < 1.3) { goal = null; throttle = 0; }
+    else {
+      const desired = Math.atan2(dx, dz);
+      turn -= clamp(normAng(desired - rover.yaw) * 1.4, -1, 1);
+      throttle = Math.min(1, throttle + dt * 1.6);
+    }
+  }
+  rover.yaw += turn * 1.7 * dt;
+  rover.speed = throttle * 12;
+  rover.x = clamp(rover.x + Math.sin(rover.yaw) * rover.speed * dt, -HALF + 1, HALF - 1);
+  rover.z = clamp(rover.z + Math.cos(rover.yaw) * rover.speed * dt, -HALF + 1, HALF - 1);
+  const moving = Math.abs(rover.speed) > 0.4;
+  energy -= (moving ? 1.05 : 0.12) * dt;
+  if (energy <= 0) { energy = 0; say("Drive energy is gone."); grade(); return; }
+  sense();
+  const here = obs[mode][cellAt(rover.x, rover.z)];
+  $("words").textContent = words(mode, here);
+}
+
+const map = $("map");
+const ctx = map.getContext("2d");
+function worldToMap(x, z, w, h) { return { px: (x / WORLD + 0.5) * w, py: (z / WORLD + 0.5) * h }; }
+function hexLerp(a, b, t) {
+  const pa = [(a >> 16) & 255, (a >> 8) & 255, a & 255];
+  const pb = [(b >> 16) & 255, (b >> 8) & 255, b & 255];
+  const c = pa.map((v, i) => Math.round(lerp(v, pb[i], clamp(t, 0, 1))));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+function cellFill(v) {
+  if (mode === "thermal") return v < 0.5 ? hexLerp(0x1d4e89, 0x6b3a6a, v / 0.5) : hexLerp(0x6b3a6a, 0xe23d3d, (v - 0.5) / 0.5);
+  if (mode === "mineral") return hexLerp(0x1a1024, 0xe879f9, v);
+  if (mode === "ice") return hexLerp(0x102028, 0x67e8f9, v);
+  return hexLerp(0x1c2430, 0xf4f7fb, v);
+}
+function drawMap() {
+  const w = map.clientWidth, h = map.clientHeight;
+  if (w < 2 || h < 2) return;
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  if (map.width !== Math.floor(w * dpr) || map.height !== Math.floor(h * dpr)) {
+    map.width = Math.floor(w * dpr); map.height = Math.floor(h * dpr);
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = "#0e131b";
+  ctx.fillRect(0, 0, w, h);
+  for (let i = 0; i < cells.length; i++) {
+    const c = cellCenter(i);
+    const p = worldToMap(c.x, c.z, w, h);
+    const cw = (CELL / WORLD) * w, ch = (CELL / WORLD) * h;
+    const v = obs[mode][i];
+    ctx.fillStyle = v == null ? "#121820" : cellFill(v);
+    ctx.fillRect(p.px - cw / 2 + 1, p.py - ch / 2 + 1, cw - 2, ch - 2);
+  }
+  for (const b of beacons) {
+    const c = cellCenter(b.i);
+    const p = worldToMap(c.x, c.z, w, h);
+    ctx.save();
+    ctx.translate(p.px, p.py);
+    ctx.rotate(Math.PI / 4);
+    ctx.fillStyle = b.logged ? "#f0c14a" : "#f4efe2";
+    ctx.fillRect(-5, -5, 10, 10);
+    ctx.restore();
+  }
+  for (const f of flags) {
+    const c = cellCenter(f.i);
+    const p = worldToMap(c.x, c.z, w, h);
+    ctx.fillStyle = f.type === "water" ? "#7ec8e3" : f.type === "mineral" ? "#e879f9" : "#f4f7fb";
+    ctx.beginPath();
+    ctx.arc(p.px, p.py, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#14181f";
+    ctx.font = "bold 11px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(f.type === "water" ? "W" : f.type === "mineral" ? "M" : "H", p.px, p.py);
+  }
+  if (goal) {
+    const p = worldToMap(goal.x, goal.z, w, h);
+    ctx.strokeStyle = "#f4efe2";
+    ctx.strokeRect(p.px - 6, p.py - 6, 12, 12);
+  }
+  const rp = worldToMap(rover.x, rover.z, w, h);
+  ctx.save();
+  ctx.translate(rp.px, rp.py);
+  ctx.rotate(rover.yaw);
+  ctx.fillStyle = "#fff";
+  ctx.beginPath();
+  ctx.moveTo(0, 10); ctx.lineTo(7, -8); ctx.lineTo(-7, -8); ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+}
+map.addEventListener("pointerdown", (ev) => {
+  if (phase !== "play") return;
+  const r = map.getBoundingClientRect();
+  const mx = (ev.clientX - r.left) / r.width;
+  const my = (ev.clientY - r.top) / r.height;
+  goal = { x: clamp((mx - 0.5) * WORLD, -HALF + 2, HALF - 2), z: clamp((my - 0.5) * WORLD, -HALF + 2, HALF - 2) };
+  say("Cruising to the point you marked.");
+});
+$("b-relief").onclick = () => setMode("relief");
+$("b-thermal").onclick = () => setMode("thermal");
+$("b-mineral").onclick = () => setMode("mineral");
+$("b-ice").onclick = () => setMode("ice");
+$("f-water").onclick = () => markFlag("water");
+$("f-mineral").onclick = () => markFlag("mineral");
+$("f-hazard").onclick = () => markFlag("hazard");
+$("f-temp").onclick = logTemp;
+$("end").onclick = grade;
+$("restart").onclick = () => location.reload();
+window.addEventListener("keydown", (e) => {
+  const k = e.key.toLowerCase();
+  keys[k] = true;
+  if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(k)) e.preventDefault();
+  if (k === "1") setMode("relief");
+  else if (k === "2") setMode("thermal");
+  else if (k === "3") setMode("mineral");
+  else if (k === "4") setMode("ice");
+  else if (k === "z") markFlag("water");
+  else if (k === "x") markFlag("mineral");
+  else if (k === "c") markFlag("hazard");
+  else if (k === "t") logTemp();
+  else if (k === "enter") grade();
+  else if (k === "r") location.reload();
+});
+window.addEventListener("keyup", (e) => { keys[e.key.toLowerCase()] = false; });
+
+const camPos = new THREE.Vector3();
+const look = new THREE.Vector3();
+let last = performance.now();
+function frame(now) {
+  const dt = clamp((now - last) / 1000, 0, 0.05);
+  last = now;
+  step(dt);
+  const y = heightAt(rover.x, rover.z);
+  roverMesh.position.set(rover.x, y, rover.z);
+  roverMesh.rotation.y = rover.yaw;
+  for (const w of roverMesh.userData.wheels) w.rotation.x += rover.speed * dt * 2.2;
+  const k = 1 - Math.exp(-dt * 2.4);
+  look.lerp(new THREE.Vector3(rover.x, y + 0.8, rover.z), k);
+  camPos.lerp(new THREE.Vector3(rover.x - Math.sin(rover.yaw) * 11, y + 7, rover.z - Math.cos(rover.yaw) * 11), k);
+  camera.position.copy(camPos);
+  camera.lookAt(look);
+  const w = viewEl.clientWidth, h = viewEl.clientHeight;
+  if (w > 0 && h > 0 && camera.aspect !== w / h) {
+    camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h, false);
+  }
+  renderer.render(scene, camera);
+  drawMap();
+  paintScore();
+  requestAnimationFrame(frame);
+}
+sense();
+paintScore();
+requestAnimationFrame(frame);
+window.ROVER = {
+  claimed, gradedScore, cells, flags, beacons, waterI, mineralI, hazardI, decoyI, beaconI,
+  get mode() { return mode; },
+  get phase() { return phase; },
+  get energy() { return energy; },
+  rover,
+  setMode, markFlag, logTemp, grade,
+  teleport(x, z) { rover.x = x; rover.z = z; sense(); }
+};
+</script>
+</body>
+</html>
