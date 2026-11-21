@@ -429,7 +429,7 @@ function step(dt) {
     const senseNow = reading();
     if (senseNow.strength >= 0.08) hold = rover.yaw + senseNow.bearing;
   }
-  if (hold != null) turn -= clamp(normAng(hold - rover.yaw) * 1.6, -1, 1);
+  if (hold != null) turn += clamp(normAng(hold - rover.yaw) * 1.6, -1, 1);
   rover.yaw += turn * 1.6 * dt;
   let throttle = 0;
   if (keys["w"] || keys["arrowup"]) throttle = 1;

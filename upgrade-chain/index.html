@@ -350,7 +350,7 @@ function step(dt) {
     const dx = target.x - rover.x, dz = target.z - rover.z;
     if (Math.hypot(dx, dz) < 1.2) { if (follow) follow = false; goal = null; }
     else {
-      turn -= clamp(normAng(Math.atan2(dx, dz) - rover.yaw) * 1.5, -1, 1);
+      turn += clamp(normAng(Math.atan2(dx, dz) - rover.yaw) * 1.5, -1, 1);
       throttle = 1;
     }
   }
