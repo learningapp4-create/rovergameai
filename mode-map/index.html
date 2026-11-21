@@ -88,6 +88,14 @@
   .boot-error { padding: 16px; color: var(--bad); }
   .group-label { margin: 2px 0 0; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim); }
   button.primary { background: #e8e3d8; color: #14181f; border-color: #e8e3d8; font-weight: 750; }
+  .brief-card p { margin: 0 0 16px; font-size: 20px; line-height: 1.35; }
+  .goalbox { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .goalbox b { font-size: 22px; font-variant-numeric: tabular-nums; }
+  #mapAct {
+    position: absolute; left: 12px; top: 12px; z-index: 2;
+    background: #e8e3d8; color: #14181f; font-weight: 750;
+    padding: 8px 12px; border-radius: 8px; pointer-events: none;
+  }
   .brief { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 24px; background: rgba(8, 10, 16, 0.68); }
   .brief[hidden] { display: none; }
   .brief-card { width: min(440px, 100%); background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 16px; padding: 22px 22px 18px; box-shadow: 0 20px 50px rgba(0,0,0,.5); }
@@ -105,31 +113,24 @@
 <body>
 <div id="brief" class="brief" role="dialog" aria-labelledby="brief-title">
   <div class="brief-card">
-    <p class="kicker">Before you roll</p>
-    <h2 id="brief-title">Layer Map</h2>
-    <ol>
-      <li><b>Goal.</b> Mark water, minerals, and hazards, and log three temperatures.</li>
-      <li><b>Move.</b> WASD drives. Click the big map to cruise. The visor is the active sensor.</li>
-      <li><b>Decide.</b> Each layer paints only where you drive, and each one hides what the others show.</li>
-      <li><b>Score.</b> The meter is a claim until you end the survey. 60% passes. Careful marks can clear 90%.</li>
-    </ol>
-    <button id="begin" class="primary" type="button">Start the survey</button>
+    <p id="brief-title">Mark 2 water pockets and 2 mineral veins before the drive energy dies.</p>
+    <button id="begin" class="primary" type="button">Ice radar</button>
   </div>
 </div>
 <header>
   <a href="../index.html">All versions</a>
   <div>
     <h1><span>LAYER</span> MAP</h1>
-    <div class="sub">Each sensor hides what the others show.</div>
   </div>
   <div class="scorebox">
-    <div class="score-row"><span id="pct">0%</span><span id="kind">CLAIMED · PASS 60 · STRONG 90</span></div>
+    <div class="score-row"><span id="pct">0%</span><span id="kind">PASS 60 · STRONG 90</span></div>
     <div class="meter" id="meter"><div class="fill" id="fill"></div><i class="tick" style="left:60%"></i><i class="tick gold" style="left:90%"></i></div>
   </div>
 </header>
 <main>
   <section id="mapPane">
     <canvas id="map"></canvas>
+    <div id="mapAct" hidden>Drive</div>
     <div id="readout"><div><span id="modeLabel">RELIEF</span><br><strong id="words">no reading</strong></div><div>Drive energy<br><strong id="energyNum">120</strong></div></div>
     <div id="banner" hidden></div>
   </section>
@@ -143,16 +144,9 @@
     </div>
     <div id="view" class="relief"><div class="tag" id="viewTag">RELIEF VISOR</div></div>
     <div id="energy"><span id="energyFill"></span></div>
-    <p class="group-label">Marks</p>
-    <div class="flags">
-      <button id="f-water">Z Water</button>
-      <button id="f-mineral">X Mineral</button>
-      <button id="f-hazard">C Hazard</button>
-      <button id="f-temp">T Temperature</button>
-    </div>
-    <p id="status">Drive to paint the active layer.</p>
-    <button id="end" class="primary">End survey</button>
-    <div class="row"><button id="restart">Restart</button></div>
+    <div class="goalbox"><span id="goal">Water and veins</span><b id="count">0/4</b></div>
+    <button id="end" class="primary">Ice radar</button>
+    <div class="row"><button id="restart">Retry</button></div>
   </aside>
 </main>
 <script type="module">
@@ -307,16 +301,73 @@ function gradedScore() {
   s += beacons.filter((b) => b.logged).length * 4;
   return clamp(Math.round(s), 0, 100);
 }
-function say(t) { $("status").textContent = t; }
+function say() {}
+let saw60 = false, saw90 = false, rejectedCell = -1;
+function flash(text, cls) {
+  const b = $("banner");
+  b.hidden = false;
+  b.className = cls || "";
+  b.textContent = text;
+}
+function markCounts() {
+  const wOk = flags.filter((f) => f.type === "water" && cells[f.i].water).length;
+  const mOk = flags.filter((f) => f.type === "mineral" && cells[f.i].mineralHot).length;
+  return { wOk, mOk };
+}
+function brightHere() {
+  const i = cellAt(rover.x, rover.z);
+  if (i === rejectedCell) return false;
+  const marked = flags.some((f) => f.i === i && ((mode === "ice" && f.type === "water") || (mode === "mineral" && f.type === "mineral")));
+  if (marked) return false;
+  const v = obs[mode][i];
+  if (v == null) return false;
+  if (mode === "ice") return v >= 0.62;
+  if (mode === "mineral") return v >= 0.55;
+  return false;
+}
+function mission() {
+  const { wOk, mOk } = markCounts();
+  const s = gradedScore();
+  const stretch = s >= 60;
+  const have = stretch ? Math.max(0, Math.min(wOk, 3) - 2) + Math.max(0, Math.min(mOk, 3) - 2) : Math.min(wOk, 2) + Math.min(mOk, 2);
+  const need = stretch ? 2 : 4;
+  const title = stretch ? "Last pockets" : "Water and veins";
+  if (phase !== "play" || s >= 90) return { label: "Retry", drive: false, have, need, title, s };
+  const needWater = stretch ? wOk < 3 : wOk < 2;
+  const needVein = stretch ? mOk < 3 : mOk < 2;
+  if (needWater) {
+    if (mode !== "ice") return { label: "Ice radar", drive: false, have, need, title, s };
+    if (!brightHere()) return { label: "Drive", drive: true, have, need, title, s };
+    return { label: "Mark water", drive: false, have, need, title, s };
+  }
+  if (needVein) {
+    if (mode !== "mineral") return { label: "Vein layer", drive: false, have, need, title, s };
+    if (!brightHere()) return { label: "Drive", drive: true, have, need, title, s };
+    return { label: "Mark vein", drive: false, have, need, title, s };
+  }
+  return { label: "Retry", drive: false, have, need, title, s };
+}
+function paintGoal() {
+  const m = mission();
+  if (!saw60 && m.s >= 60) { saw60 = true; flash("Pass", "pass"); }
+  if (!saw90 && m.s >= 90) { saw90 = true; flash("Strong", "great"); }
+  $("goal").textContent = m.title;
+  $("count").textContent = m.have + "/" + m.need;
+  const btn = $("end");
+  btn.hidden = m.drive;
+  btn.textContent = m.label;
+  $("restart").hidden = true;
+  $("mapAct").hidden = !m.drive;
+  $("mapAct").textContent = "Drive";
+}
 function paintScore() {
-  const real = graded ? gradedScore() : null;
-  const s = graded ? real : Math.min(100, claimed());
+  const s = gradedScore();
   $("pct").textContent = s + "%";
-  $("kind").textContent = graded ? "COMPLETION · PASS 60 · STRONG 90" : "CLAIMED IF TRUE · PASS 60 · STRONG 90";
   $("fill").style.width = s + "%";
   $("meter").className = "meter" + (s >= 90 ? " great" : s >= 60 ? " pass" : "");
   $("energyNum").textContent = Math.max(0, Math.ceil(energy));
   $("energyFill").style.width = clamp(energy / 120, 0, 1) * 100 + "%";
+  paintGoal();
 }
 
 const scene = new THREE.Scene();
@@ -463,11 +514,17 @@ function setMode(next) {
 function markFlag(type) {
   if (phase !== "play") return;
   const i = cellAt(rover.x, rover.z);
+  const c = cells[i];
+  const ok = type === "water" ? c.water : type === "mineral" ? c.mineralHot : false;
+  if (!ok) {
+    rejectedCell = i;
+    flash(type === "water" ? "That mark was not water." : "That mark was not a vein.", "fail");
+    return;
+  }
+  rejectedCell = -1;
   const existing = flags.find((f) => f.i === i);
-  if (existing) { existing.type = type; say("Mark updated to " + type + "."); return; }
-  if (flags.length >= 9) { say("Nine marks is the notebook limit."); return; }
-  flags.push({ i, type });
-  say("Marked this cell as " + type + ". " + flags.length + " of 9.");
+  if (existing) existing.type = type;
+  else if (flags.length < 9) flags.push({ i, type });
 }
 function logTemp() {
   if (phase !== "play") return;
@@ -479,21 +536,13 @@ function logTemp() {
   b.logged = true;
   say(b.name + " logged as " + words("thermal", cells[i].temp) + ".");
 }
-function grade() {
-  if (phase !== "play") return;
-  phase = "done";
-  graded = true;
-  goal = null;
-  const s = gradedScore();
-  const waterHit = flags.filter((f) => f.type === "water" && cells[f.i].water).length;
-  const minHit = flags.filter((f) => f.type === "mineral" && cells[f.i].mineralHot).length;
-  const hazHit = flags.filter((f) => f.type === "hazard" && cells[f.i].hazard).length;
-  const temps = beacons.filter((b) => b.logged).length;
-  const banner = $("banner");
-  banner.hidden = false;
-  banner.className = s >= 90 ? "great" : s >= 60 ? "pass" : "fail";
-  banner.textContent = (s >= 90 ? "STRONG PASS " : s >= 60 ? "PASS " : "BELOW THE LINE ") + s + "% · water " + waterHit + "/3 · minerals " + minHit + "/3 · hazards " + hazHit + "/6 · temps " + temps + "/3";
-  say(s >= 60 ? "Survey graded. The claims that were wrong were subtracted." : "Survey graded under the 60% line. Wrong marks cost points.");
+function nextAction() {
+  const label = $("end").textContent;
+  if (label === "Retry" || phase !== "play") { location.reload(); return; }
+  if (label === "Ice radar") setMode("ice");
+  else if (label === "Vein layer") setMode("mineral");
+  else if (label === "Mark water") markFlag("water");
+  else if (label === "Mark vein") markFlag("mineral");
 }
 function step(dt) {
   if (!live || phase !== "play") { rover.speed = 0; return; }
@@ -518,7 +567,18 @@ function step(dt) {
   rover.z = clamp(rover.z + Math.cos(rover.yaw) * rover.speed * dt, -HALF + 1, HALF - 1);
   const moving = Math.abs(rover.speed) > 0.4;
   energy -= (moving ? 1.05 : 0.12) * dt;
-  if (energy <= 0) { energy = 0; say("Drive energy is gone."); grade(); return; }
+  if (energy <= 0) {
+    energy = 0;
+    phase = "done";
+    goal = null;
+    const s = gradedScore();
+    const { wOk } = markCounts();
+    if (s >= 90) flash("Strong", "great");
+    else if (s >= 60) flash("The last pockets are still dark.", "fail");
+    else flash(wOk < 2 ? "Missed the water." : "Missed the vein.", "fail");
+    return;
+  }
+  if (goal && brightHere()) { goal = null; throttle = 0; rover.speed = 0; }
   sense();
   const here = obs[mode][cellAt(rover.x, rover.z)];
   $("words").textContent = words(mode, here);
@@ -603,19 +663,14 @@ map.addEventListener("pointerdown", (ev) => {
   const mx = (ev.clientX - r.left) / r.width;
   const my = (ev.clientY - r.top) / r.height;
   goal = { x: clamp((mx - 0.5) * WORLD, -HALF + 2, HALF - 2), z: clamp((my - 0.5) * WORLD, -HALF + 2, HALF - 2) };
-  say("Cruising to the point you marked.");
 });
 $("b-relief").onclick = () => setMode("relief");
 $("b-thermal").onclick = () => setMode("thermal");
 $("b-mineral").onclick = () => setMode("mineral");
 $("b-ice").onclick = () => setMode("ice");
-$("f-water").onclick = () => markFlag("water");
-$("f-mineral").onclick = () => markFlag("mineral");
-$("f-hazard").onclick = () => markFlag("hazard");
-$("f-temp").onclick = logTemp;
-$("end").onclick = grade;
+$("end").onclick = nextAction;
 $("restart").onclick = () => location.reload();
-$("begin").onclick = () => { live = true; $("brief").hidden = true; };
+$("begin").onclick = () => { live = true; $("brief").hidden = true; setMode("ice"); };
 window.addEventListener("keydown", (e) => {
   if (!live) return;
   const k = e.key.toLowerCase();
@@ -629,7 +684,7 @@ window.addEventListener("keydown", (e) => {
   else if (k === "x") markFlag("mineral");
   else if (k === "c") markFlag("hazard");
   else if (k === "t") logTemp();
-  else if (k === "enter") grade();
+  else if (k === "enter") nextAction();
   else if (k === "r") location.reload();
 });
 window.addEventListener("keyup", (e) => { keys[e.key.toLowerCase()] = false; });
@@ -670,7 +725,7 @@ window.ROVER = {
   get phase() { return phase; },
   get energy() { return energy; },
   rover,
-  setMode, markFlag, logTemp, grade,
+  setMode, markFlag, logTemp,
   teleport(x, z) { rover.x = x; rover.z = z; sense(); }
 };
 </script>

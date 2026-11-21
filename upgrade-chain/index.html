@@ -64,40 +64,35 @@
   .brief-card ol { margin: 0 0 16px; padding-left: 1.15em; }
   .brief-card li { margin: 8px 0; }
   .brief-card .primary { width: 100%; padding: 12px; }
+  .brief-card p { margin: 0 0 16px; font-size: 20px; line-height: 1.35; }
+  .goalbox { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 8px 0; }
+  .goalbox b { font-size: 22px; font-variant-numeric: tabular-nums; color: var(--good); }
 </style>
 </head>
 <body>
 <div id="brief" class="brief" role="dialog" aria-labelledby="brief-title">
   <div class="brief-card">
-    <p class="kicker">Before you roll</p>
-    <h2 id="brief-title">Tool Ladder</h2>
-    <ol>
-      <li><b>Goal.</b> Scoop soil, then a mineral vein, then temperatures, then the ice core.</li>
-      <li><b>Move.</b> WASD drives. Click the map to cruise. The camera sees bright soil and dark dust.</li>
-      <li><b>Decide.</b> Each sample unlocks the next tool. The new tool is what makes the next target readable.</li>
-      <li><b>Score.</b> Soil, dust, and the vein pass 60%. Temperatures and the ice core are how you clear 90%.</li>
-    </ol>
-    <button id="begin" class="primary" type="button">Start the ladder</button>
+    <p id="brief-title">Scoop the bright soil, the dark dust, and the vein.</p>
+    <button id="begin" class="primary" type="button">Follow soil</button>
   </div>
 </div>
 <header>
   <a href="../index.html">All versions</a>
-  <div><h1><span>TOOL</span> LADDER</h1><div style="color:#7dba8c;font-size:13px">An easy sample unlocks the next eye.</div></div>
+  <div><h1><span>TOOL</span> LADDER</h1></div>
   <div class="scorebox">
     <div class="score-row"><span id="pct">0%</span><span>PASS 60 · STRONG 90</span></div>
     <div class="meter" id="meter"><div class="fill" id="fill"></div><i class="tick" style="left:60%"></i><i class="tick gold" style="left:90%"></i></div>
   </div>
 </header>
 <aside id="tools">
-  <div class="tool on" id="slot-camera"><button id="m-camera" aria-pressed="true">1 Camera</button><div>Sees soil and dust.</div></div>
-  <div class="tool" id="slot-spectro"><button id="m-spectro" disabled>2 Spectrometer</button><div>Locked until the bright soil is scooped.</div></div>
-  <div class="tool" id="slot-thermal"><button id="m-thermal" disabled>3 Thermal probe</button><div>Locked until the vein is sampled.</div></div>
-  <div class="tool" id="slot-drill"><button id="m-drill" disabled>4 Drill</button><div>Locked until two temperatures are logged.</div></div>
-  <p id="status">Scoop the bright soil. That pays for the spectrometer.</p>
-  <button id="act" class="primary">Use tool</button>
+  <div class="tool on" id="slot-camera"><button id="m-camera" aria-pressed="true">Camera</button></div>
+  <div class="tool" id="slot-spectro"><button id="m-spectro" disabled>Spectrometer</button></div>
+  <div class="tool" id="slot-thermal"><button id="m-thermal" disabled>Thermal</button></div>
+  <div class="tool" id="slot-drill"><button id="m-drill" disabled>Drill</button></div>
+  <div class="goalbox"><span id="goal">Soil, dust, vein</span><b id="count">0/3</b></div>
+  <button id="act" class="primary">Follow soil</button>
   <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
-    <button id="follow">Follow pin</button>
-    <button id="restart">Restart</button>
+    <button id="restart">Retry</button>
   </div>
   <div id="clock" style="margin-top:8px;color:#9dff6a">3:30</div>
 </aside>
@@ -206,7 +201,38 @@ function score() {
   else if (got.icePartial) s += 4;
   return clamp(s, 0, 100);
 }
-function say(t) { $("status").textContent = t; }
+function say() {}
+let saw60 = false, saw90 = false;
+function flash(text, cls) {
+  const b = $("banner");
+  b.hidden = false;
+  b.className = cls || "";
+  b.textContent = text;
+}
+function nextTask() {
+  if (!got.soil) return { label: near(soil, 3.2) ? "Scoop soil" : "Follow soil", mode: "camera", target: soil };
+  if (!got.dust) return { label: near(dust, 3.2) ? "Scoop dust" : "Follow dust", mode: "camera", target: dust };
+  if (!got.mineral) return { label: near(mineral, 3) ? "Sample vein" : "Follow vein", mode: "spectro", target: mineral };
+  const logged = got.temps.filter(Boolean).length;
+  const mast = temps.find((p, i) => !got.temps[i]);
+  if (logged < 2 && mast) return { label: near(mast, 3) ? "Log mast" : "Follow mast", mode: "thermal", target: mast };
+  if (!got.ice) return { label: near(ice, 2.6) ? "Core ice" : "Follow ice", mode: "drill", target: ice };
+  return { label: "Retry", mode: mode, target: null };
+}
+function paintGoal() {
+  const s = score();
+  if (!saw60 && s >= 60) { saw60 = true; flash("Pass", "pass"); }
+  if (!saw90 && s >= 90) { saw90 = true; flash("Strong", "great"); }
+  const samples = (got.soil ? 1 : 0) + (got.dust ? 1 : 0) + (got.mineral ? 1 : 0);
+  const stretch = s >= 60;
+  const logged = Math.min(2, got.temps.filter(Boolean).length);
+  $("goal").textContent = stretch ? "Masts and core" : "Soil, dust, vein";
+  $("count").textContent = stretch ? (logged + (got.ice ? 1 : 0)) + "/3" : samples + "/3";
+  const task = nextTask();
+  const label = phase === "done" ? "Retry" : task.label;
+  $("act").textContent = label;
+  $("restart").hidden = true;
+}
 function paintScore() {
   const s = score();
   $("pct").textContent = s + "%";
@@ -220,12 +246,9 @@ function paintScore() {
     $("m-" + name).disabled = !tools[name];
     $("m-" + name).setAttribute("aria-pressed", mode === name ? "true" : "false");
   }
+  paintGoal();
 }
-function refreshCopy() {
-  $("slot-spectro").lastElementChild.textContent = tools.spectro ? "Reads mineral veins. Decoys flicker." : "Locked until the bright soil is scooped.";
-  $("slot-thermal").lastElementChild.textContent = tools.thermal ? "Logs the three temperature masts." : "Locked until the vein is sampled.";
-  $("slot-drill").lastElementChild.textContent = tools.drill ? "Cores the ice under the pale disc." : "Locked until two temperatures are logged.";
-}
+function refreshCopy() {}
 function setGuess(target, offset) {
   if (!target) { guess = null; return; }
   const ang = rand() * Math.PI * 2;
@@ -238,24 +261,24 @@ function refine() {
     guess.offset = 1.3;
     guess.x = guess.target.x + Math.cos(ang) * 1.3;
     guess.z = guess.target.z + Math.sin(ang) * 1.3;
-    say("Pin refined. The rover moved it closer.");
+    say();
   }
 }
 function unlockFromProgress() {
   if (got.soil && !tools.spectro) {
     tools.spectro = true;
     setGuess(mineral, 5.5);
-    say("Spectrometer online. Mineral layer is readable. The pin is a first guess.");
+    say();
   }
   if (got.mineral && !tools.thermal) {
     tools.thermal = true;
     setGuess(temps.find((_, i) => !got.temps[i]), 4.5);
-    say("Thermal probe online. Three masts will show on that layer.");
+    say();
   }
   if (got.temps.filter(Boolean).length >= 2 && !tools.drill) {
     tools.drill = true;
     setGuess(ice, 6);
-    say("Drill online. Ice shows as a wide pale disc. The core is the bright middle.");
+    say();
   }
   refreshCopy();
 }
@@ -306,10 +329,12 @@ function endRun() {
   follow = false;
   goal = null;
   const s = score();
-  const banner = $("banner");
-  banner.hidden = false;
-  banner.className = s >= 90 ? "great" : s >= 60 ? "pass" : "fail";
-  banner.textContent = (s >= 90 ? "STRONG PASS " : s >= 60 ? "PASS " : "BELOW THE LINE ") + s + "%";
+  if (s >= 90) flash("Strong", "great");
+  else if (!got.soil) flash("The bright soil is still there.", "fail");
+  else if (!got.dust) flash("The dark dust is still there.", "fail");
+  else if (!got.mineral) flash("The vein is still unread.", "fail");
+  else if (got.temps.filter(Boolean).length < 2) flash("A mast is still unread.", "fail");
+  else flash("The ice core is still in the ground.", "fail");
 }
 function step(dt) {
   if (!live || phase !== "play") { rover.speed = 0; return; }
@@ -334,7 +359,7 @@ function step(dt) {
   rover.x = clamp(rover.x + Math.sin(rover.yaw) * rover.speed * dt, -30, 30);
   rover.z = clamp(rover.z + Math.cos(rover.yaw) * rover.speed * dt, -30, 30);
   refine();
-  if (timeLeft <= 0) { say("Shift over."); endRun(); }
+  if (timeLeft <= 0) endRun();
 }
 
 const scene = new THREE.Scene();
@@ -514,19 +539,31 @@ map.addEventListener("pointerdown", (ev) => {
   const my = (ev.clientY - rect.top) / rect.height;
   goal = { x: (mx - 0.5) * WORLD, z: (my - 0.5) * WORLD };
   follow = false;
-  say("Cruising.");
 });
 $("m-camera").onclick = () => setMode("camera");
 $("m-spectro").onclick = () => setMode("spectro");
 $("m-thermal").onclick = () => setMode("thermal");
 $("m-drill").onclick = () => setMode("drill");
-$("act").onclick = useTool;
-$("follow").onclick = () => {
-  if (!guess) { say("No pin yet. Unlock the next tool."); return; }
-  follow = true; goal = null; say("Following the rover’s pin.");
-};
+function followTarget(p) {
+  if (!p) return;
+  setGuess(p, 0);
+  follow = true;
+  goal = null;
+}
+function doAction() {
+  if (phase === "done" || $("act").textContent === "Retry") { location.reload(); return; }
+  const task = nextTask();
+  if (task.label.startsWith("Follow")) {
+    setMode(task.mode);
+    followTarget(task.target);
+    return;
+  }
+  setMode(task.mode);
+  useTool();
+}
+$("act").onclick = doAction;
 $("restart").onclick = () => location.reload();
-$("begin").onclick = () => { live = true; $("brief").hidden = true; };
+$("begin").onclick = () => { live = true; $("brief").hidden = true; setMode("camera"); followTarget(soil); };
 window.addEventListener("keydown", (e) => {
   if (!live) return;
   keys[e.key.toLowerCase()] = true;

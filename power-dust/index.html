@@ -63,28 +63,25 @@
   .brief-card ol { margin: 0 0 16px; padding-left: 1.15em; }
   .brief-card li { margin: 8px 0; }
   .brief-card button { width: 100%; padding: 12px; background: var(--amber); color: #2a1c08; border-color: var(--amber); font-weight: 750; }
+  .brief-card p { margin: 0 0 16px; font-size: 20px; line-height: 1.35; }
+  .goalbox { display: flex; justify-content: space-between; align-items: baseline; margin-top: 8px; }
+  .goalbox b { font-size: 22px; font-variant-numeric: tabular-nums; }
+  button.primary { background: var(--amber); color: #2a1c08; border-color: var(--amber); font-weight: 750; width: 100%; margin-top: 8px; }
 </style>
 </head>
 <body>
 <div id="brief" class="brief" role="dialog" aria-labelledby="brief-title">
   <div class="brief-card">
-    <p class="kicker">Before you roll</p>
-    <h2 id="brief-title">Dust Run</h2>
-    <ol>
-      <li><b>Goal.</b> Drop the cargo at the cache and rescue the stranded rover.</li>
-      <li><b>Move.</b> WASD drives. The needle points at the target for the sensor you have selected.</li>
-      <li><b>Decide.</b> Thermal seeks the cache. Radio seeks the beacon. Dust blinds both, and driving spends power.</li>
-      <li><b>Score.</b> Both tasks pass 60%. Power left when you finish can clear 90%.</li>
-    </ol>
-    <button id="begin" type="button">Start the run</button>
+    <p id="brief-title">Drop the cache cargo and reach the stranded rover before the dust takes the charge.</p>
+    <button id="begin" type="button">Seek cache</button>
   </div>
 </div>
 <div id="view"></div>
 <header>
   <a href="../index.html">All versions</a>
-  <div><h1><span>DUST</span> RUN</h1><div style="color:#c4a574;font-size:13px">Power budget, blinding dust.</div></div>
+  <div><h1><span>DUST</span> RUN</h1></div>
   <div class="scorebox">
-    <div class="score-row"><span id="pct">0%</span><span id="kind">SECURED · PASS 60 · STRONG 90</span></div>
+    <div class="score-row"><span id="pct">0%</span><span id="kind">PASS 60 · STRONG 90</span></div>
     <div class="meter" id="meter"><div class="fill" id="fill"></div><i class="tick" style="left:60%"></i><i class="tick gold" style="left:90%"></i></div>
   </div>
 </header>
@@ -102,11 +99,10 @@
       </div>
     </div>
   </div>
-  <p id="status">Thermal seeks the cache. Radio seeks the beacon.</p>
-  <p id="hint">E drops cargo · hold F to rescue · N holds a bearing</p>
+  <div class="goalbox"><span id="goal">Cache and rover</span><b id="count">0/2</b></div>
+  <button id="go" class="primary">Seek cache</button>
   <div class="row">
-    <button id="end">End run</button>
-    <button id="restart">Restart</button>
+    <button id="restart">Retry</button>
   </div>
 </div>
 <div id="banner" hidden></div>
@@ -210,18 +206,56 @@ function finalScore() {
   if (cargoDone && rescueDone) s += 20 * clamp(power / 50, 0, 1);
   return clamp(Math.round(s), 0, 100);
 }
-function say(t) { $("status").textContent = t; }
+function say() {}
+let saw60 = false, saw90 = false;
+let cruise = null;
+let bask = false;
+function flash(text, cls) {
+  const b = $("banner");
+  b.hidden = false;
+  b.className = cls || "";
+  b.textContent = text;
+}
+function nearCache() { return Math.hypot(rover.x - cache.x, rover.z - cache.z) <= 5.5; }
+function nearRover() { return Math.hypot(rover.x - stranded.x, rover.z - stranded.z) <= 5; }
+function actionLabel() {
+  if (phase !== "play") return "Retry";
+  if (!cargoDone) return nearCache() ? "Drop cargo" : "Seek cache";
+  if (!rescueDone) return nearRover() ? "Rescue" : "Seek rover";
+  if (Math.round(power) < 50) return "Bask";
+  return "Retry";
+}
+function paintGoal() {
+  const s = liveScore();
+  if (!saw60 && cargoDone && rescueDone && s >= 60) { saw60 = true; flash("Pass", "pass"); }
+  if (!saw90 && s >= 90) { saw90 = true; flash("Strong", "great"); }
+  const tasks = (cargoDone ? 1 : 0) + (rescueDone ? 1 : 0);
+  let title = "Cache and rover";
+  let count = tasks + "/2";
+  if (tasks >= 2 && s < 90) {
+    title = "Sun charge";
+    count = Math.min(25, Math.round(power)) + "/25";
+  } else if (tasks >= 2) {
+    title = "Full charge";
+    count = Math.min(50, Math.round(power)) + "/50";
+  }
+  $("goal").textContent = title;
+  $("count").textContent = count;
+  const label = actionLabel();
+  $("go").textContent = label;
+  $("restart").hidden = true;
+}
 function paintScore() {
   const s = graded ? finalScore() : liveScore();
   $("pct").textContent = s + "%";
-  $("kind").textContent = (graded ? "COMPLETION" : "SECURED") + " · PASS 60 · STRONG 90";
   $("fill").style.width = s + "%";
   $("meter").className = "meter" + (s >= 90 ? " great" : s >= 60 ? " pass" : "");
   $("powerNum").textContent = Math.round(power);
   $("powerFill").style.width = power + "%";
-  $("sensorName").textContent = mode === "thermal" ? "Thermal · cold cache" : "Radio · distress beacon";
+  $("sensorName").textContent = mode === "thermal" ? "Cache" : "Rover";
   $("b-thermal").setAttribute("aria-pressed", mode === "thermal" ? "true" : "false");
   $("b-radio").setAttribute("aria-pressed", mode === "radio" ? "true" : "false");
+  paintGoal();
 }
 function reading() {
   const target = mode === "thermal" ? cache : stranded;
@@ -238,16 +272,17 @@ function reading() {
   const strength = (1 - dist / range) * (dusty ? 0.2 : 1);
   return { strength, bearing: bearing + (strength > 0.05 ? jitter : 0), dusty, dist };
 }
-function endRun(reason) {
+function endRun() {
   if (graded) return;
   phase = "done";
   graded = true;
+  cruise = null;
+  bask = false;
   const s = finalScore();
-  const banner = $("banner");
-  banner.hidden = false;
-  banner.className = s >= 90 ? "great" : s >= 60 ? "pass" : "fail";
-  banner.textContent = (s >= 90 ? "STRONG PASS " : s >= 60 ? "PASS " : "BELOW THE LINE ") + s + "% · cargo " + (cargoDone ? "yes" : "no") + " · rescue " + (rescueDone ? "yes" : "no") + " · power " + Math.round(power);
-  say(reason || "Run graded. Closeness is included now.");
+  if (s >= 90) flash("Strong", "great");
+  else if (!cargoDone) flash("The cache is still sealed.", "fail");
+  else if (!rescueDone) flash("The rover is still stranded.", "fail");
+  else flash("The charge fell short.", "fail");
 }
 
 const scene = new THREE.Scene();
@@ -382,27 +417,39 @@ function step(dt) {
   timeLeft -= dt;
   const dusty = inDustAt(rover.x, rover.z, time);
   let turn = 0;
+  if (keys["w"] || keys["arrowup"] || keys["a"] || keys["arrowleft"] || keys["d"] || keys["arrowright"] || keys["s"] || keys["arrowdown"]) {
+    cruise = null;
+    bask = false;
+  }
   if (keys["a"] || keys["arrowleft"]) { turn += 1; hold = null; }
   if (keys["d"] || keys["arrowright"]) { turn -= 1; hold = null; }
+  if (cruise === "cache" && nearCache()) cruise = null;
+  if (cruise === "rover" && nearRover()) cruise = null;
+  if (cruise) {
+    const senseNow = reading();
+    if (senseNow.strength >= 0.08) hold = rover.yaw + senseNow.bearing;
+  }
   if (hold != null) turn -= clamp(normAng(hold - rover.yaw) * 1.6, -1, 1);
   rover.yaw += turn * 1.6 * dt;
   let throttle = 0;
   if (keys["w"] || keys["arrowup"]) throttle = 1;
   if (keys["s"] || keys["arrowdown"]) throttle = -0.4;
+  if (cruise) throttle = 1;
+  if (bask) { throttle = 0; hold = null; }
   const limp = power < 18 && !keys["shift"];
   const speed = throttle * (limp ? 4.2 : 11);
   rover.speed = speed;
   rover.x = clamp(rover.x + Math.sin(rover.yaw) * speed * dt, -46, 46);
   rover.z = clamp(rover.z + Math.cos(rover.yaw) * speed * dt, -46, 46);
   const moving = Math.abs(speed) > 0.3;
-  const sunlit = !dusty && heightAt(rover.x, rover.z) > -0.15;
+  const sunlit = !dusty && (bask || heightAt(rover.x, rover.z) > -0.15);
   if (moving) power -= 8.2 * dt;
   else power -= 0.35 * dt;
   if (sunlit) power += (moving ? 0.8 : 4.6) * dt;
   if (keys["f"] && !rescueDone && Math.hypot(rover.x - stranded.x, rover.z - stranded.z) < 5) {
     power -= 2 * dt;
     rescueHold += dt;
-    if (rescueHold > 1.35) { rescueDone = true; say("Rescue beacon attached."); }
+    if (rescueHold > 1.35) rescueDone = true;
   } else rescueHold = 0;
   power = clamp(power, 0, 100);
   bestCargo = Math.min(bestCargo, Math.hypot(rover.x - cache.x, rover.z - cache.z));
@@ -425,25 +472,41 @@ function step(dt) {
   scene.fog.density = dusty ? 0.08 : 0.014;
   dustCloud.visible = dusty;
   if (dusty) dustCloud.position.set(rover.x, 0, rover.z);
-  if (power <= 0) { power = 0; endRun("Power is gone."); return; }
-  if (timeLeft <= 0) endRun("The sun is too low to continue.");
+  if (power <= 0) { power = 0; endRun(); return; }
+  if (timeLeft <= 0) endRun();
   if (dusty && sense.strength < 0.15) {
     /* keep the last status if a more specific message is up */
   }
 }
 function deliver() {
   if (phase !== "play" || cargoDone) return;
-  if (Math.hypot(rover.x - cache.x, rover.z - cache.z) > 5.5) { say("No cache in reach. Follow a clear thermal needle."); return; }
+  if (!nearCache()) return;
   cargoDone = true;
+  cruise = null;
   power = Math.max(0, power - 4);
-  say("Cargo is down in the crater.");
 }
 function setMode(next) { mode = next; hold = null; }
+function seek(which) {
+  if (phase !== "play") return;
+  bask = false;
+  setMode(which === "rover" ? "radio" : "thermal");
+  cruise = which === "rover" ? "rover" : "cache";
+  const sense = reading();
+  if (sense.strength >= 0.08) hold = rover.yaw + sense.bearing;
+}
+function doAction() {
+  const label = $("go").textContent;
+  if (label === "Seek cache") seek("cache");
+  else if (label === "Drop cargo") deliver();
+  else if (label === "Seek rover") seek("rover");
+  else if (label === "Rescue") { if (nearRover()) rescueDone = true; cruise = null; }
+  else if (label === "Bask") { bask = true; cruise = null; hold = null; }
+  else if (label === "Retry") location.reload();
+}
 function captureHold() {
   const sense = reading();
-  if (sense.dusty || sense.strength < 0.2) { say("The bearing is too dirty to hold."); return; }
+  if (sense.dusty || sense.strength < 0.2) return;
   hold = rover.yaw + sense.bearing;
-  say("Holding that bearing. Dust will not update it.");
 }
 
 const map = $("map");
@@ -513,11 +576,11 @@ function drawNeedle() {
   g.beginPath(); g.arc(60, 60, 4, 0, Math.PI * 2); g.fill();
 }
 
-$("b-thermal").onclick = () => setMode("thermal");
-$("b-radio").onclick = () => setMode("radio");
-$("end").onclick = () => endRun();
+$("b-thermal").onclick = () => seek("cache");
+$("b-radio").onclick = () => seek("rover");
+$("go").onclick = doAction;
 $("restart").onclick = () => location.reload();
-$("begin").onclick = () => { live = true; $("brief").hidden = true; };
+$("begin").onclick = () => { live = true; $("brief").hidden = true; seek("cache"); };
 window.addEventListener("keydown", (e) => {
   if (!live) return;
   keys[e.key.toLowerCase()] = true;
@@ -526,7 +589,7 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "2") setMode("radio");
   if (e.key === "e" || e.key === "E") deliver();
   if (e.key === "n" || e.key === "N") captureHold();
-  if (e.key === "Enter") endRun();
+  if (e.key === "Enter") doAction();
   if (e.key === "r" || e.key === "R") location.reload();
 });
 window.addEventListener("keyup", (e) => { keys[e.key.toLowerCase()] = false; });

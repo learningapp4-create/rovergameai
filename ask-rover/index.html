@@ -76,6 +76,16 @@
   .brief-card ol { margin: 0 0 16px; padding-left: 1.15em; }
   .brief-card li { margin: 8px 0; }
   .brief-card button { width: 100%; padding: 12px; background: #1c160f; color: #f3ead7; border-color: #1c160f; font-weight: 750; }
+  .brief-card p { margin: 0 0 16px; font-size: 20px; line-height: 1.35; }
+  .goalbox { display: flex; gap: 10px; align-items: baseline; }
+  .goalbox b { font-size: 22px; font-variant-numeric: tabular-nums; }
+  #flash {
+    position: absolute; left: 12px; bottom: 12px;
+    background: #1c1910ee; border-radius: 10px; padding: 10px 14px; font-weight: 750;
+  }
+  #flash.pass { color: #7dcea0; }
+  #flash.great { color: #f0c14a; }
+  #flash.fail { color: #e7a098; }
   @media (max-width: 800px) {
     #desk { grid-template-columns: 1fr; grid-template-rows: 160px 1fr; }
     main { grid-template-rows: 28% 1fr; }
@@ -85,22 +95,15 @@
 <body>
 <div id="brief" class="brief" role="dialog" aria-labelledby="brief-title">
   <div class="brief-card">
-    <p class="kicker">Before you roll</p>
-    <h2 id="brief-title">Rover's Plan</h2>
-    <ol>
-      <li><b>Goal.</b> Eight stops. Ice and minerals are worth the most. Soil and landmarks fill the rest.</li>
-      <li><b>Look.</b> The card is the rover's reading. The map shows only where you have been.</li>
-      <li><b>Decide.</b> Accept the plan, edit the heading, or override it. A scan first makes the next guess sharper.</li>
-      <li><b>Score.</b> 60% passes. Hitting the real sites, not the empty ground, is how you clear 90%.</li>
-    </ol>
-    <button id="begin" type="button">Let it propose</button>
+    <p id="brief-title">Confirm both ice pockets and both mineral veins.</p>
+    <button id="begin" type="button">Accept plan</button>
   </div>
 </div>
 <header>
   <a href="../index.html">All versions</a>
   <div>
     <h1><span>ROVER'S</span> PLAN</h1>
-    <div class="sub">It proposes. You accept, edit, or override.</div>
+    <div class="goalbox"><span id="goal">Ice and veins</span><b id="count">0/4</b></div>
   </div>
   <div class="scorebox">
     <div class="score-row"><span id="pct">0%</span><span>PASS 60 · STRONG 90</span></div>
@@ -108,7 +111,7 @@
   </div>
 </header>
 <main>
-  <div id="view"><div id="tag">ROVER CAM · TURN 1 / 8</div></div>
+  <div id="view"><div id="tag">ROVER CAM · TURN 1 / 8</div><div id="flash" hidden></div></div>
   <section id="desk">
     <canvas id="map"></canvas>
     <article id="card"></article>
@@ -212,7 +215,13 @@ function blurb(kind) {
   return lines[kind];
 }
 function makeProposal() {
-  const open = features.filter((f) => !f.done && f.kind !== "hazard").sort((a, b) => dist(rover, a) - dist(rover, b));
+  const want = new Set(wantedKinds());
+  const open = features.filter((f) => !f.done && f.kind !== "hazard").sort((a, b) => {
+    const aw = want.has(a.kind) ? 0 : 1;
+    const bw = want.has(b.kind) ? 0 : 1;
+    if (aw !== bw) return aw - bw;
+    return dist(rover, a) - dist(rover, b);
+  });
   const hazards = features.filter((f) => !f.done && f.kind === "hazard");
   if (!open.length && !hazards.length) return null;
   if (accuracy < 0.78 && rand() < 0.1) {
@@ -300,12 +309,36 @@ function resolve(action, x, z) {
   return "Empty regolith. −2%.";
 }
 function clampScore() { score = clamp(score, 0, 100); }
+function kindCount(kind) { return features.filter((f) => f.done && f.kind === kind).length; }
+function wantedKinds() {
+  if (kindCount("ice") < 2) return ["ice"];
+  if (kindCount("mineral") < 2) return ["mineral"];
+  return ["soil"];
+}
+let saw60 = false, saw90 = false;
+function flash(text, cls) {
+  const b = $("flash");
+  if (!b) return;
+  b.hidden = false;
+  b.className = cls || "";
+  b.textContent = text;
+}
+function paintGoal() {
+  const ice = kindCount("ice"), mineral = kindCount("mineral"), soil = kindCount("soil");
+  if (!saw60 && score >= 60) { saw60 = true; flash("Pass", "pass"); }
+  if (!saw90 && score >= 90) { saw90 = true; flash("Strong", "great"); }
+  const stretch = score >= 60;
+  const have = stretch ? Math.min(soil, 2) : Math.min(ice, 2) + Math.min(mineral, 2);
+  $("goal").textContent = stretch ? "Soil scoops" : "Ice and veins";
+  $("count").textContent = have + "/" + (stretch ? 2 : 4);
+}
 function paintScore() {
   clampScore();
   $("pct").textContent = score + "%";
   $("fill").style.width = score + "%";
   $("meter").className = "meter" + (score >= 90 ? " great" : score >= 60 ? " pass" : "");
   $("tag").textContent = "ROVER CAM · TURN " + Math.min(turn, TURNS) + " / " + TURNS;
+  paintGoal();
 }
 function remember(text) { log.unshift(text); if (log.length > 4) log.pop(); }
 function cardHTML(body, controls) {
@@ -317,27 +350,22 @@ function renderChoose() {
   const heading = compassDeg(rover, proposal.dest);
   const distance = dist(rover, proposal.dest);
   cardHTML(
-    `<h2>Proposal · ${Math.round(proposal.confidence * 100)}% confidence</h2>
-     <p>${proposal.lines[0]}</p><p>${proposal.lines[1]}</p><p><strong>${proposal.lines[2]}</strong></p>
-     <p class="muted">Head ${cardinal(heading)} (${Math.round(heading)}°) for ${distance.toFixed(0)} m, then ${proposal.action}.</p>`,
+    `<h2>${proposal.lines[2]}</h2>`,
     `<div class="row">
-      <button class="primary" id="accept">Accept</button>
+      <button class="primary" id="accept">Accept plan</button>
       <button id="edit">Edit</button>
       <button id="override">Override</button>
-      <button id="finish">End shift</button>
     </div>`
   );
   bind("accept", () => launch(proposal.dest, proposal.action));
   bind("edit", renderEdit);
   bind("override", renderOverride);
-  bind("finish", renderDone);
 }
 function renderEdit() {
   const heading = compassDeg(rover, proposal.dest);
   const distance = dist(rover, proposal.dest);
   cardHTML(
     `<h2>Edit the plan</h2>
-     <p>Nudge the heading or the distance, and pick the tool. The rover still does not see the whole truth.</p>
      <div class="row">
        <label>Heading nudge <span id="nudgeLabel">0°</span><input id="nudge" type="range" min="-50" max="50" value="0"></label>
        <label>Distance <span id="distLabel">${Math.round(distance)} m</span><input id="dist" type="range" min="50" max="150" value="100"></label>
@@ -363,14 +391,12 @@ function renderOverride() {
   overridePoint = null;
   cardHTML(
     `<h2>Override</h2>
-     <p>Click the map, or pick a compass point. This ignores the rover’s heading.</p>
      <div class="dirs" id="dirs"></div>
      <div class="row">
-       <label>Distance<select id="olen"><option value="12">short 12 m</option><option value="20" selected>medium 20 m</option><option value="32">long 32 m</option></select></label>
+       <label>Distance<select id="olen"><option value="12">12 m</option><option value="20" selected>20 m</option><option value="32">32 m</option></select></label>
        <label>Tool<select id="oact"><option>sample</option><option>scan</option><option>mark</option><option>avoid</option></select></label>
-     </div>
-     <p id="picked" class="muted">No map point yet. Compass buttons still work.</p>`,
-    `<div class="row"><button class="primary" id="go">Go</button><button id="back">Back</button></div>`
+     </div>`,
+    `<div class="row"><button class="primary" id="go">Send override</button><button id="back">Back</button></div>`
   );
   const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
   $("dirs").innerHTML = dirs.map((d) => `<button data-dir="${d}">${d}</button>`).join("");
@@ -380,7 +406,6 @@ function renderOverride() {
     if (!b) return;
     dir = b.dataset.dir;
     overridePoint = null;
-    $("picked").textContent = "Compass " + dir + ".";
   };
   bind("go", () => {
     let dest = overridePoint;
@@ -401,14 +426,20 @@ function launch(dest, action) {
   move = { x: rover.x, z: rover.z, dest, action, t: 0 };
   rover.yaw = Math.atan2(dest.x - rover.x, dest.z - rover.z);
   phase = "move";
-  $("card").innerHTML = "<h2>Rolling…</h2><p>The rover is committed for this turn.</p>";
+  $("card").innerHTML = "<h2>Rolling</h2>";
+}
+function missLine() {
+  if (kindCount("ice") < 2) return "Missed an ice pocket.";
+  if (kindCount("mineral") < 2) return "Missed a mineral vein.";
+  if (kindCount("soil") < 2) return "Missed a soil scoop.";
+  return "Short of the line.";
 }
 function renderDone() {
   phase = "done";
   clampScore();
   const cls = score >= 90 ? "great" : score >= 60 ? "pass" : "fail";
-  const title = score >= 90 ? "STRONG PASS" : score >= 60 ? "PASS" : "BELOW THE LINE";
-  $("card").innerHTML = `<h2 id="banner" class="${cls}">${title} ${score}%</h2><p>The shift is over. Ice and minerals were worth the most. A scan before a long drive is how the strong scores happen.</p><button id="restart2">Restart</button><div id="log">${log.map((l) => "· " + l).join("<br>")}</div>`;
+  const title = score >= 90 ? "Strong" : score >= 60 ? "Pass" : missLine();
+  $("card").innerHTML = `<h2 class="${cls}">${title}</h2><button id="restart2">Retry</button>`;
   bind("restart2", () => location.reload());
   paintScore();
 }
