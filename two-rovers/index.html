@@ -243,6 +243,7 @@ function finalScore() {
 }
 function say() {}
 let saw60 = false, saw90 = false;
+let linkGoal = false;
 function flash(text, cls) {
   const b = $("banner");
   b.hidden = false;
@@ -256,19 +257,23 @@ function shownScore() {
 }
 function paintGoal() {
   const s = shownScore();
-  if (!saw60 && s >= 60) { saw60 = true; flash("Pass", "pass"); }
-  if (!saw90 && s >= 90) { saw90 = true; flash("Strong", "great"); }
   const tasks = (cargoDone ? 1 : 0) + (rescueDone ? 1 : 0);
-  const stretch = tasks >= 2;
-  $("goal").textContent = stretch ? "Hold the link" : "Cargo and probe";
-  $("count").textContent = stretch ? (handshakeDone ? 3 : Math.min(3, Math.floor(handshakeTime))) + "/3" : tasks + "/2";
+  const mainDone = tasks >= 2;
+  if (!saw60 && mainDone && s >= 60) { saw60 = true; flash("Pass", "pass"); }
+  if (!saw90 && handshakeDone && s >= 90) { saw90 = true; flash("Strong", "great"); }
+  if (!linkGoal) {
+    $("goal").textContent = "Cargo and probe";
+    $("count").textContent = tasks + "/2";
+  } else {
+    $("goal").textContent = "Hold the link";
+    $("count").textContent = (handshakeDone ? 3 : Math.min(3, Math.floor(handshakeTime))) + "/3";
+  }
   let label = "Send Luna";
   let onMap = false;
-  if (phase === "done" || s >= 90) label = "Retry";
+  if (phase === "done" || (linkGoal && handshakeDone) || s >= 90) label = "Retry";
   else if (!cargoDone) { label = "Send Luna"; onMap = activeName === "LUNA"; }
   else if (!rescueDone) { label = "Send Mare"; onMap = activeName === "MARE"; }
-  else if (!handshakeDone) label = "Call meetup";
-  else label = "Retry";
+  else label = "Call meetup";
   const go = $("go");
   go.hidden = onMap;
   go.textContent = label;
@@ -296,6 +301,13 @@ function command(r, x, z) {
   if (phase !== "play") return;
   r.pending = { x: clamp(x, -38, 38), z: clamp(z, -28, 28) };
   r.pendingAt = now + 1.05;
+}
+function sendNow(r, x, z) {
+  if (phase !== "play") return;
+  r.tx = clamp(x, -38, 38);
+  r.tz = clamp(z, -28, 28);
+  r.hasTarget = true;
+  r.pending = null;
 }
 function meetup() {
   if (phase !== "play") return;
@@ -365,6 +377,7 @@ function step(dt) {
 }
 
 const scene = new THREE.Scene();
+let groundMesh = null;
 scene.background = new THREE.Color(0x120818);
 scene.fog = new THREE.FogExp2(0x120818, 0.018);
 const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 220);
@@ -408,6 +421,7 @@ scene.add(sun.target);
   geo.computeVertexNormals();
   const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94 }));
   mesh.receiveShadow = true;
+  groundMesh = mesh;
   scene.add(mesh);
 }
 function buildRover(color) {
@@ -603,13 +617,38 @@ $("card-luna").onclick = () => selectRover("LUNA");
 $("card-mare").onclick = () => selectRover("MARE");
 $("go").onclick = () => {
   const label = $("go").textContent;
-  if (label === "Send Luna") selectRover("LUNA");
-  else if (label === "Send Mare") selectRover("MARE");
-  else if (label === "Call meetup") meetup();
+  if (label === "Send Luna") { selectRover("LUNA"); sendNow(luna, depot.x, depot.z); }
+  else if (label === "Send Mare") { selectRover("MARE"); sendNow(mare, probe.x, probe.z); }
+  else if (label === "Call meetup") {
+    if (cargoDone && rescueDone && !linkGoal) {
+      linkGoal = true;
+      $("banner").hidden = true;
+    }
+    meetup();
+  }
   else if (label === "Retry") location.reload();
 };
 $("restart").onclick = () => location.reload();
-$("begin").onclick = () => { live = true; $("brief").hidden = true; selectRover("LUNA"); };
+$("begin").onclick = () => {
+  live = true;
+  $("brief").hidden = true;
+  selectRover("LUNA");
+  sendNow(luna, depot.x, depot.z);
+};
+renderer.domElement.addEventListener("pointerdown", (ev) => {
+  if (!live || phase !== "play") return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((ev.clientX - rect.left) / rect.width) * 2 - 1, -((ev.clientY - rect.top) / rect.height) * 2 + 1);
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(ndc, camera);
+  const hit = groundMesh ? ray.intersectObject(groundMesh)[0] : null;
+  let point = hit ? hit.point : null;
+  if (!point) {
+    point = new THREE.Vector3();
+    if (!ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), point)) return;
+  }
+  sendNow(active(), point.x, point.z);
+});
 window.addEventListener("keydown", (e) => {
   if (!live) return;
   if (e.key === "Tab") { e.preventDefault(); selectRover(activeName === "LUNA" ? "MARE" : "LUNA"); }

@@ -316,11 +316,13 @@ function completion() {
   const hits = hazards.filter((h) => h.hit).length;
   let s = mg * 12 + ig * 16 - hits * 6;
   if (hits === 0 && mg + ig >= 5) s += 4;
+  if (mg >= 4 && ig >= 1) s = Math.max(s, 64);
   return clamp(Math.round(s), 0, 100);
 }
 
 function say() {}
-let saw60 = false, saw90 = false, scrapeNoted = false;
+let saw60 = false, saw90 = false;
+let iceGoal = false;
 function flash(text, cls) {
   const b = $("banner");
   b.hidden = false;
@@ -352,16 +354,17 @@ function paintGoal() {
   const mg = minerals.filter((m) => m.got).length;
   const ig = ices.filter((m) => m.got).length;
   const s = completion();
-  if (!saw60 && s >= 60) { saw60 = true; flash("Pass", "pass"); }
-  if (!saw90 && s >= 90) { saw90 = true; flash("Strong", "great"); }
   const passHave = mg + Math.min(ig, 1);
-  if (!saw60 && passHave >= 5 && !scrapeNoted) {
-    scrapeNoted = true;
-    flash("A scrape dropped the cache under the line.", "fail");
+  const full = mg >= 4 && ig >= 1;
+  if (!saw60 && full && s >= 60) { saw60 = true; flash("Pass", "pass"); }
+  if (!saw90 && s >= 90) { saw90 = true; flash("Strong", "great"); }
+  if (!iceGoal) {
+    $("goal").textContent = "Hills and ice";
+    $("count").textContent = Math.min(passHave, 5) + "/5";
+  } else {
+    $("goal").textContent = "Ice pockets";
+    $("count").textContent = Math.min(Math.max(ig - 1, 0), 2) + "/2";
   }
-  const stretch = s >= 60;
-  $("goal").textContent = stretch ? "Ice pockets" : "Hills and ice";
-  $("count").textContent = (stretch ? Math.min(ig, 3) : Math.min(passHave, 5)) + "/" + (stretch ? 3 : 5);
   const act = planAction();
   if (act.label === "Retry" && phase === "plan" && s < 60) {
     phase = "done";
@@ -391,6 +394,7 @@ function recomputeKnown() {
 }
 
 const scene = new THREE.Scene();
+let groundMesh = null;
 scene.background = new THREE.Color(0x070a12);
 scene.fog = new THREE.FogExp2(0x070a12, 0.012);
 const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 240);
@@ -487,6 +491,7 @@ function buildTerrain() {
   geo.computeBoundingSphere();
   const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, metalness: 0.02 }));
   mesh.receiveShadow = true;
+  groundMesh = mesh;
   scene.add(mesh);
 }
 buildTerrain();
@@ -560,21 +565,22 @@ const posts = [];
 
 const cargoBits = [];
 function syncCargo() {
+  for (const box of cargoBits) roverMesh.remove(box);
+  cargoBits.length = 0;
   const colors = [
     ...minerals.filter((m) => m.got).map(() => 0xe39a4a),
     ...ices.filter((m) => m.got).map(() => 0x9fd4ff)
   ];
-  while (cargoBits.length < colors.length) {
-    const i = cargoBits.length;
+  colors.forEach((color, i) => {
     const box = new THREE.Mesh(
       new THREE.BoxGeometry(0.18, 0.14, 0.18),
-      new THREE.MeshStandardMaterial({ color: colors[i], roughness: 0.4, metalness: 0.2 })
+      new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.2 })
     );
     box.position.set(-0.28 + (i % 3) * 0.22, 0.78, -0.12 - Math.floor(i / 3) * 0.22);
     box.castShadow = true;
     roverMesh.add(box);
     cargoBits.push(box);
-  }
+  });
 }
 function stain(x, z, color) {
   const m = new THREE.Mesh(
@@ -595,6 +601,7 @@ function plantFlag(x, z, color) {
   group.position.set(x, heightAt(x, z), z);
   scene.add(group);
   flags.push(group);
+  return group;
 }
 function burst(x, z, color) {
   const m = new THREE.Mesh(new THREE.SphereGeometry(0.28, 10, 8), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85 }));
@@ -797,6 +804,10 @@ function addPing(x, z) {
   const pingColor = mode === "mineral" ? 0xe39a4a : mode === "ice" ? 0x79c7ff : 0xff6b7a;
   addRing(x, z, pingColor);
   stain(x, z, pingColor);
+  if (mode === "ice" && saw60) {
+    iceGoal = true;
+    $("banner").hidden = true;
+  }
 }
 function addWaypoint(x, z) {
   const hit = wps.findIndex((w) => Math.hypot(w.x - x, w.z - z) < 2.2);
@@ -826,7 +837,7 @@ function checkPickups() {
   for (const m of minerals) {
     if (!m.got && Math.hypot(m.x - rover.x, m.z - rover.z) < 4.2) {
       m.got = true;
-      plantFlag(m.x, m.z, 0xe39a4a);
+      m.flag = plantFlag(m.x, m.z, 0xe39a4a);
       syncCargo();
       say();
     }
@@ -834,7 +845,7 @@ function checkPickups() {
   for (const ic of ices) {
     if (!ic.got && Math.hypot(ic.x - rover.x, ic.z - rover.z) < 4.2) {
       ic.got = true;
-      plantFlag(ic.x, ic.z, 0x79c7ff);
+      ic.flag = plantFlag(ic.x, ic.z, 0x79c7ff);
       syncCargo();
       say();
     }
@@ -846,7 +857,22 @@ function checkPickups() {
       rover.x -= Math.sin(rover.yaw) * 1.5;
       rover.z -= Math.cos(rover.yaw) * 1.5;
       burst(h.x, h.z, 0xff6b7a);
-      flash("Soft ground.", "fail");
+      const lost = [...minerals].reverse().find((m) => m.got) || [...ices].reverse().find((m) => m.got);
+      if (lost) {
+        lost.got = false;
+        if (lost.flag) { scene.remove(lost.flag); lost.flag = null; }
+        const fell = new THREE.Mesh(
+          new THREE.BoxGeometry(0.28, 0.2, 0.28),
+          new THREE.MeshStandardMaterial({ color: minerals.includes(lost) ? 0xe39a4a : 0x79c7ff })
+        );
+        fell.position.set(h.x, heightAt(h.x, h.z) + 0.25, h.z);
+        fell.rotation.z = 0.4;
+        scene.add(fell);
+        syncCargo();
+        flash(minerals.includes(lost) ? "A mineral crate fell on the soft ground." : "An ice crate fell on the soft ground.", "fail");
+      } else {
+        flash("The wheels bogged. The rack was empty.", "fail");
+      }
     }
   }
 }
@@ -925,16 +951,44 @@ $("m-ice").onclick = () => setMode("ice");
 $("m-hazard").onclick = () => setMode("hazard");
 $("m-route").onclick = () => setMode("route");
 $("undo").onclick = undo;
+function pingNamed(kind) {
+  setMode(kind);
+  const list = kind === "ice" ? ices : minerals;
+  const target = list.find((m) => !m.got) || list[0];
+  if (target && budget > 0) addPing(target.x, target.z);
+}
 $("commit").onclick = () => {
   const label = $("commit").textContent;
   if (label === "Send rover") commit();
-  else if (label === "Ping mineral") setMode("mineral");
-  else if (label === "Ping ice") setMode("ice");
+  else if (label === "Ping mineral") pingNamed("mineral");
+  else if (label === "Ping ice") pingNamed("ice");
   else if (label === "Mark route") setMode("route");
   else if (label === "Retry") location.reload();
 };
 $("restart").onclick = () => location.reload();
-$("begin").onclick = () => { live = true; $("brief").hidden = true; setMode("mineral"); };
+$("begin").onclick = () => {
+  live = true;
+  $("brief").hidden = true;
+  pingNamed("mineral");
+};
+renderer.domElement.addEventListener("pointerdown", (ev) => {
+  if (!live || phase !== "plan") return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((ev.clientX - rect.left) / rect.width) * 2 - 1, -((ev.clientY - rect.top) / rect.height) * 2 + 1);
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(ndc, camera);
+  const hit = groundMesh ? ray.intersectObject(groundMesh)[0] : null;
+  let point = hit ? hit.point : null;
+  if (!point) {
+    point = new THREE.Vector3();
+    if (!ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), point)) return;
+  }
+  point.x = clamp(point.x, -26, 26);
+  point.z = clamp(point.z, -26, 26);
+  const label = $("commit").textContent;
+  if (mode === "route" || label === "Mark route" || label === "Send rover") addWaypoint(point.x, point.z);
+  else if (budget > 0) addPing(point.x, point.z);
+});
 window.addEventListener("keydown", (e) => {
   if (!live) return;
   if (e.key === "1") setMode("mineral");

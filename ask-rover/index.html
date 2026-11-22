@@ -320,6 +320,8 @@ function wantedKinds() {
   return ["soil"];
 }
 let saw60 = false, saw90 = false;
+let soilGoal = false;
+function mainAsk() { return kindCount("ice") >= 2 && kindCount("mineral") >= 2; }
 function flash(text, cls) {
   const b = $("flash");
   if (!b) return;
@@ -329,12 +331,15 @@ function flash(text, cls) {
 }
 function paintGoal() {
   const ice = kindCount("ice"), mineral = kindCount("mineral"), soil = kindCount("soil");
-  if (!saw60 && score >= 60) { saw60 = true; flash("Pass", "pass"); }
+  if (!saw60 && mainAsk()) { saw60 = true; flash("Pass", "pass"); }
   if (!saw90 && score >= 90) { saw90 = true; flash("Strong", "great"); }
-  const stretch = score >= 60;
-  const have = stretch ? Math.min(soil, 2) : Math.min(ice, 2) + Math.min(mineral, 2);
-  $("goal").textContent = stretch ? "Soil scoops" : "Ice and veins";
-  $("count").textContent = have + "/" + (stretch ? 2 : 4);
+  if (!soilGoal) {
+    $("goal").textContent = "Ice and veins";
+    $("count").textContent = (Math.min(ice, 2) + Math.min(mineral, 2)) + "/4";
+  } else {
+    $("goal").textContent = "Soil scoops";
+    $("count").textContent = Math.min(soil, 2) + "/2";
+  }
 }
 function paintScore() {
   clampScore();
@@ -425,12 +430,17 @@ function renderOverride() {
 let mapOverride = false;
 function launch(dest, action) {
   if (phase !== "choose") return;
+  if (mainAsk() && !soilGoal) {
+    soilGoal = true;
+    $("flash").hidden = true;
+  }
   mapOverride = false;
   dest = { x: clamp(dest.x, -40, 40), z: clamp(dest.z, -40, 40) };
   move = { x: rover.x, z: rover.z, dest, action, t: 0 };
   rover.yaw = Math.atan2(dest.x - rover.x, dest.z - rover.z);
   phase = "move";
   $("card").innerHTML = "<h2>Rolling</h2>";
+  paintScore();
 }
 function missLine() {
   if (kindCount("ice") < 2) return "Missed an ice pocket.";
@@ -722,7 +732,11 @@ proposal = makeProposal();
 renderChoose();
 paintScore();
 requestAnimationFrame(frame);
-$("begin").onclick = () => { live = true; $("brief").hidden = true; };
+$("begin").onclick = () => {
+  live = true;
+  $("brief").hidden = true;
+  if (proposal) launch(proposal.dest, proposal.action);
+};
 window.addEventListener("keydown", (e) => {
   if (!live) return;
   if (e.key === "r" || e.key === "R") location.reload();

@@ -265,7 +265,7 @@ function reading() {
   const range = 34;
   const dusty = inDustAt(rover.x, rover.z, time);
   if (time - jitterT > 0.28) {
-    jitter = (rand() - 0.5) * (dusty ? 1.35 : 0.1);
+    jitter = (rand() - 0.5) * (dusty ? 0.45 : 0.1);
     jitterT = time;
   }
   if (dist > range) return { strength: 0, bearing: 0, dusty, dist };
@@ -452,8 +452,13 @@ function step(dt) {
   if (cruise === "cache" && nearCache()) cruise = null;
   if (cruise === "rover" && nearRover()) cruise = null;
   if (cruise) {
+    const target = cruise === "rover" ? stranded : cache;
+    const dx = target.x - rover.x, dz = target.z - rover.z;
+    const dist = Math.hypot(dx, dz);
     const senseNow = reading();
-    if (senseNow.strength >= 0.08) hold = rover.yaw + senseNow.bearing;
+    if (senseNow.strength >= 0.25 && !senseNow.dusty) hold = rover.yaw + senseNow.bearing;
+    else hold = Math.atan2(dx, dz);
+    if (dist < 0.8) cruise = null;
   }
   if (hold != null) turn += clamp(normAng(hold - rover.yaw) * 1.6, -1, 1);
   rover.yaw += turn * 1.6 * dt;
@@ -469,7 +474,7 @@ function step(dt) {
   rover.z = clamp(rover.z + Math.cos(rover.yaw) * speed * dt, -46, 46);
   const moving = Math.abs(speed) > 0.3;
   const sunlit = !dusty && (bask || heightAt(rover.x, rover.z) > -0.15);
-  if (moving) power -= 8.2 * dt;
+  if (moving) power -= 6.2 * dt;
   else power -= 0.35 * dt;
   if (sunlit) power += (moving ? 0.8 : 4.6) * dt;
   if (keys["f"] && !rescueDone && Math.hypot(rover.x - stranded.x, rover.z - stranded.z) < 5) {
@@ -516,8 +521,10 @@ function seek(which) {
   bask = false;
   setMode(which === "rover" ? "radio" : "thermal");
   cruise = which === "rover" ? "rover" : "cache";
+  const target = cruise === "rover" ? stranded : cache;
   const sense = reading();
-  if (sense.strength >= 0.08) hold = rover.yaw + sense.bearing;
+  if (sense.strength >= 0.25 && !sense.dusty) hold = rover.yaw + sense.bearing;
+  else hold = Math.atan2(target.x - rover.x, target.z - rover.z);
 }
 function doAction() {
   const label = $("go").textContent;

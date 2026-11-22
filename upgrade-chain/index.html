@@ -211,6 +211,7 @@ function score() {
 }
 function say() {}
 let saw60 = false, saw90 = false;
+let mastGoal = false;
 function flash(text, cls) {
   const b = $("banner");
   b.hidden = false;
@@ -229,13 +230,17 @@ function nextTask() {
 }
 function paintGoal() {
   const s = score();
-  if (!saw60 && s >= 60) { saw60 = true; flash("Pass", "pass"); }
-  if (!saw90 && s >= 90) { saw90 = true; flash("Strong", "great"); }
   const samples = (got.soil ? 1 : 0) + (got.dust ? 1 : 0) + (got.mineral ? 1 : 0);
-  const stretch = s >= 60;
-  const logged = Math.min(2, got.temps.filter(Boolean).length);
-  $("goal").textContent = stretch ? "Masts and core" : "Soil, dust, vein";
-  $("count").textContent = stretch ? (logged + (got.ice ? 1 : 0)) + "/3" : samples + "/3";
+  if (!saw60 && samples >= 3 && s >= 60) { saw60 = true; flash("Pass", "pass"); }
+  if (!saw90 && s >= 90) { saw90 = true; flash("Strong", "great"); }
+  if (!mastGoal) {
+    $("goal").textContent = "Soil, dust, vein";
+    $("count").textContent = samples + "/3";
+  } else {
+    const logged = Math.min(2, got.temps.filter(Boolean).length);
+    $("goal").textContent = "Masts and core";
+    $("count").textContent = (logged + (got.ice ? 1 : 0)) + "/3";
+  }
   const task = nextTask();
   const label = phase === "done" ? "Retry" : task.label;
   $("act").textContent = label;
@@ -573,6 +578,10 @@ function followTarget(p) {
 function doAction() {
   if (phase === "done" || $("act").textContent === "Retry") { location.reload(); return; }
   const task = nextTask();
+  if (got.soil && got.dust && got.mineral && !mastGoal) {
+    mastGoal = true;
+    $("banner").hidden = true;
+  }
   if (task.label.startsWith("Follow")) {
     setMode(task.mode);
     followTarget(task.target);
