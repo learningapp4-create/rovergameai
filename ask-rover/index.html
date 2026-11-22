@@ -332,7 +332,7 @@ function flash(text, cls) {
 function paintGoal() {
   const ice = kindCount("ice"), mineral = kindCount("mineral"), soil = kindCount("soil");
   if (!saw60 && mainAsk()) { saw60 = true; flash("Pass", "pass"); }
-  if (!saw90 && score >= 90) { saw90 = true; flash("Strong", "great"); }
+  if (!saw90 && mainAsk() && score >= 90) { saw90 = true; flash("Strong", "great"); }
   if (!soilGoal) {
     $("goal").textContent = "Ice and veins";
     $("count").textContent = (Math.min(ice, 2) + Math.min(mineral, 2)) + "/4";
@@ -345,7 +345,8 @@ function paintScore() {
   clampScore();
   $("pct").textContent = score + "%";
   $("fill").style.width = score + "%";
-  $("meter").className = "meter" + (score >= 90 ? " great" : score >= 60 ? " pass" : "");
+  const met = mainAsk();
+  $("meter").className = "meter" + (!met ? "" : score >= 90 ? " great" : score >= 60 ? " pass" : "");
   $("tag").textContent = "ROVER CAM · TURN " + Math.min(turn, TURNS) + " / " + TURNS;
   paintGoal();
 }
@@ -451,8 +452,9 @@ function missLine() {
 function renderDone() {
   phase = "done";
   clampScore();
-  const cls = score >= 90 ? "great" : score >= 60 ? "pass" : "fail";
-  const title = score >= 90 ? "Strong" : score >= 60 ? "Pass" : missLine();
+  const met = mainAsk();
+  const cls = !met ? "fail" : score >= 90 ? "great" : "pass";
+  const title = !met ? missLine() : score >= 90 ? "Strong" : "Pass";
   $("card").innerHTML = `<h2 class="${cls}">${title}</h2><button id="restart2">Retry</button>`;
   bind("restart2", () => location.reload());
   paintScore();
