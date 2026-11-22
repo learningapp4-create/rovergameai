@@ -176,6 +176,14 @@ const placed = place([
 const byId = (id) => placed.filter((p) => p.id === id);
 const soil = byId("soil")[0];
 const dust = byId("dust")[0];
+if (soil) {
+  soil.x = -18 + Math.sin(0.4) * 13;
+  soil.z = Math.min(22, 16 + Math.cos(0.4) * 13);
+}
+if (dust && soil) {
+  dust.x = soil.x + 9;
+  dust.z = soil.z - 7;
+}
 const mineral = byId("mineral")[0];
 const decoys = byId("decoy");
 const temps = byId("temp");
@@ -424,9 +432,12 @@ const mineralDisc = mineral ? disc(mineral.x, mineral.z, 2.4, 0xc86bff, 0.8) : n
 const decoyDiscs = decoys.map((d) => disc(d.x, d.z, 2.2, 0xc86bff, 0.45));
 const tempMasts = temps.map((p) => {
   const g = new THREE.Group();
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 1.8, 6), new THREE.MeshStandardMaterial({ color: 0xffcc66, emissive: 0x553300 }));
-  pole.position.y = 0.9;
-  g.add(pole);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 2.4, 6), new THREE.MeshStandardMaterial({ color: 0xffcc66, emissive: 0x553300 }));
+  pole.position.y = 1.2;
+  pole.castShadow = true;
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffcc66 }));
+  bulb.position.y = 2.45;
+  g.add(pole, bulb);
   g.position.set(p.x, heightAt(p.x, p.z), p.z);
   scene.add(g);
   return g;
@@ -452,7 +463,16 @@ function buildRover() {
   dish.position.set(-0.15, 1.15, -0.35); dish.rotation.x = 0.4; dish.visible = false; dish.castShadow = true; g.add(dish);
   const drill = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.12, 0.85, 8), new THREE.MeshStandardMaterial({ color: 0xb7fff2, metalness: 0.6, roughness: 0.3 }));
   drill.position.set(0, 0.55, 0.95); drill.rotation.x = Math.PI / 2; drill.visible = false; drill.castShadow = true; g.add(drill);
-  g.userData.parts = { arm, dish, drill };
+  const clod = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6), new THREE.MeshStandardMaterial({ color: 0xf4fff0, roughness: 0.8 }));
+  clod.position.set(0.2, 0.72, 0.15);
+  clod.visible = false;
+  clod.castShadow = true;
+  g.add(clod);
+  const dustClod = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 6), new THREE.MeshStandardMaterial({ color: 0x6d6458, roughness: 0.9 }));
+  dustClod.position.set(-0.16, 0.7, 0.12);
+  dustClod.visible = false;
+  g.add(dustClod);
+  g.userData.parts = { arm, dish, drill, clod, dustClod };
   scene.add(g);
   return g;
 }
@@ -507,7 +527,7 @@ function drawMap() {
   ctx.fillRect(0, 0, w, h);
   if (mode === "camera") {
     if (soil && !got.soil) blot(soil.x, soil.z, 3.2, "#f4fff0", w, h);
-    if (dust && !got.dust) blot(dust.x, dust.z, 3.2, "#6d6458", w, h);
+    if (got.soil && dust && !got.dust) blot(dust.x, dust.z, 3.2, "#6d6458", w, h);
   } else if (mode === "spectro") {
     const flick = 0.35 + Math.abs(Math.sin(performance.now() / 180)) * 0.55;
     for (const d of decoys) blot(d.x, d.z, 2.2, `rgba(200,107,255,${flick})`, w, h);
@@ -582,17 +602,28 @@ window.addEventListener("keydown", (e) => {
 window.addEventListener("keyup", (e) => { keys[e.key.toLowerCase()] = false; });
 
 function syncView() {
-  if (soilDisc) soilDisc.visible = mode === "camera" && !got.soil;
-  if (dustDisc) dustDisc.visible = mode === "camera" && !got.dust;
-  if (mineralDisc) mineralDisc.visible = mode === "spectro" && !got.mineral;
+  if (soilDisc) soilDisc.visible = !got.soil;
+  if (dustDisc) dustDisc.visible = got.soil && !got.dust;
+  if (mineralDisc) {
+    mineralDisc.visible = tools.spectro && !got.mineral;
+    mineralDisc.material.opacity = mode === "spectro" ? 0.9 : 0.4;
+  }
   decoyDiscs.forEach((d) => { d.visible = mode === "spectro"; d.material.opacity = 0.2 + Math.abs(Math.sin(performance.now() / 180)) * 0.45; });
-  tempMasts.forEach((m, i) => { m.visible = mode === "thermal" && !got.temps[i]; });
-  if (iceDisc) iceDisc.visible = mode === "drill" && !got.ice;
-  if (iceCore) iceCore.visible = mode === "drill" && !got.ice;
+  tempMasts.forEach((m, i) => {
+    m.visible = tools.thermal && !got.temps[i];
+    const bulb = m.children[1];
+    if (bulb) bulb.material.color.setHex(got.temps[i] ? 0x7dffb3 : 0xffcc66);
+  });
+  if (iceDisc) iceDisc.visible = tools.drill && !got.ice;
+  if (iceCore) iceCore.visible = tools.drill && !got.ice;
   const parts = roverMesh.userData.parts;
   parts.arm.visible = tools.spectro;
   parts.dish.visible = tools.thermal;
   parts.drill.visible = tools.drill;
+  parts.clod.visible = got.soil;
+  parts.dustClod.visible = got.dust;
+  if (tools.spectro) parts.arm.rotation.z = mode === "spectro" ? -0.4 : 0;
+  if (tools.drill && mode === "drill") parts.drill.position.z = 0.95 + Math.sin(performance.now() / 140) * 0.08;
 }
 const camPos = new THREE.Vector3();
 const look = new THREE.Vector3();

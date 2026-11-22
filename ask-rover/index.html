@@ -234,10 +234,14 @@ function makeProposal() {
     };
   }
   let target = open[0] || hazards[0];
-  if (hazards.length && rand() < 0.16) target = hazards[Math.floor(rand() * hazards.length)];
+  if (turn === 1) {
+    const firstIce = open.find((f) => f.kind === "ice");
+    if (firstIce) target = firstIce;
+  } else if (hazards.length && rand() < 0.16) target = hazards[Math.floor(rand() * hazards.length)];
   else if (accuracy < 0.74 && open[1] && rand() < 0.32) target = open[1];
   const trueDeg = compassDeg(rover, target);
-  const err = (1 - accuracy) * (rand() * 70 - 35);
+  let err = (1 - accuracy) * (rand() * 70 - 35);
+  if (turn === 1) err *= 0.15;
   const heading = (trueDeg + err + 360) % 360;
   const td = dist(rover, target);
   const distance = clamp(td * (0.78 + rand() * 0.28), 8, 34);
@@ -449,6 +453,15 @@ function finishMove() {
   remember(text);
   const fresh = visited[visited.length - 1];
   if (fresh && !fresh.pinned) { fresh.pinned = true; addPin(fresh); }
+  if (/Empty|empty|did not|wide berth|struck rock/.test(text)) {
+    const scar = new THREE.Mesh(
+      new THREE.CircleGeometry(0.8, 14),
+      new THREE.MeshBasicMaterial({ color: 0x3a2e22, transparent: true, opacity: 0.75, depthWrite: false, side: THREE.DoubleSide })
+    );
+    scar.rotation.x = -Math.PI / 2;
+    scar.position.set(move.dest.x, heightAt(move.dest.x, move.dest.z) + 0.06, move.dest.z);
+    scene.add(scar);
+  }
   rover.x = move.dest.x;
   rover.z = move.dest.z;
   turn += 1;
@@ -564,6 +577,64 @@ function addPin(v) {
   m.position.set(v.x, heightAt(v.x, v.z) + 0.4, v.z);
   scene.add(m);
 }
+const featureMeshes = features.map((f) => {
+  const g = new THREE.Group();
+  if (f.kind === "ice") {
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(1.5, 20), new THREE.MeshBasicMaterial({ color: 0xd7f6ff, transparent: true, opacity: 0.45, depthWrite: false, side: THREE.DoubleSide }));
+    disc.rotation.x = -Math.PI / 2;
+    const shard = new THREE.Mesh(new THREE.OctahedronGeometry(0.32, 0), new THREE.MeshStandardMaterial({ color: 0xe8fbff, emissive: 0x16384a, roughness: 0.15, metalness: 0.2 }));
+    shard.position.y = 0.4;
+    shard.castShadow = true;
+    g.add(disc, shard);
+  } else if (f.kind === "mineral") {
+    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.48, 0), new THREE.MeshStandardMaterial({ color: 0x5c4a58, emissive: 0x3a1040, roughness: 0.55 }));
+    rock.position.y = 0.22;
+    rock.castShadow = true;
+    g.add(rock);
+  } else if (f.kind === "soil") {
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(1.4, 18), new THREE.MeshBasicMaterial({ color: 0xe7d3b0, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide }));
+    disc.rotation.x = -Math.PI / 2;
+    g.add(disc);
+  } else if (f.kind === "landmark") {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 2.4, 6), new THREE.MeshStandardMaterial({ color: 0xf0c14a, metalness: 0.4 }));
+    pole.position.y = 1.2;
+    pole.castShadow = true;
+    g.add(pole);
+  } else {
+    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.85, 0), new THREE.MeshStandardMaterial({ color: 0x4a3028, roughness: 0.92 }));
+    rock.position.y = 0.35;
+    rock.castShadow = true;
+    g.add(rock);
+  }
+  g.position.set(f.x, heightAt(f.x, f.z), f.z);
+  g.visible = false;
+  scene.add(g);
+  return g;
+});
+const stake = new THREE.Group();
+{
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 1.7, 6), new THREE.MeshBasicMaterial({ color: 0xfff6e4 }));
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), new THREE.MeshBasicMaterial({ color: 0xfff6e4 }));
+  head.position.y = 0.95;
+  stake.add(pole, head);
+  scene.add(stake);
+}
+function syncAsk() {
+  features.forEach((f, i) => {
+    const nearProp = proposal && Math.hypot(f.x - proposal.dest.x, f.z - proposal.dest.z) < 6.5;
+    const d = Math.hypot(f.x - rover.x, f.z - rover.z);
+    featureMeshes[i].visible = f.done || nearProp || d < 8;
+    if (f.done && f.kind !== "hazard") featureMeshes[i].scale.setScalar(1.15);
+  });
+  if (proposal && phase === "choose") {
+    stake.visible = true;
+    stake.position.set(proposal.dest.x, heightAt(proposal.dest.x, proposal.dest.z) + 0.85, proposal.dest.z);
+    rover.yaw = Math.atan2(proposal.dest.x - rover.x, proposal.dest.z - rover.z);
+  } else {
+    stake.visible = phase === "move";
+    if (move) stake.position.set(move.dest.x, heightAt(move.dest.x, move.dest.z) + 0.85, move.dest.z);
+  }
+}
 
 const map = $("map");
 const ctx = map.getContext("2d");
@@ -630,6 +701,7 @@ function frame(t) {
     if (k >= 1) finishMove();
   }
   const y = heightAt(rover.x, rover.z);
+  syncAsk();
   roverMesh.position.set(rover.x, y, rover.z);
   roverMesh.rotation.y = rover.yaw;
   const follow = phase === "move" ? 1 : 0.4;

@@ -181,8 +181,8 @@ function makeRover(name, x, z, color) {
 }
 const luna = makeRover("LUNA", -32, -8, 0x2ee6d6);
 const mare = makeRover("MARE", 32, -16, 0xff8a3d);
-luna.yaw = Math.atan2(10, -4);
-mare.yaw = Math.atan2(-10, 6);
+luna.yaw = Math.atan2(depot.x - luna.x, depot.z - luna.z);
+mare.yaw = Math.atan2(probe.x - mare.x, probe.z - mare.z);
 let activeName = "LUNA";
 let now = 0;
 let timeLeft = 150;
@@ -436,14 +436,36 @@ function buildRover(color) {
 }
 const lunaMesh = buildRover(0x2ee6d6);
 const mareMesh = buildRover(0xff8a3d);
-const depotMesh = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.8, 2.2), new THREE.MeshStandardMaterial({ color: 0xf0c14a, roughness: 0.6 }));
-depotMesh.position.set(depot.x, heightAt(depot.x, depot.z) + 0.4, depot.z);
-depotMesh.castShadow = true;
+const depotMesh = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.6, 0.18, 20), new THREE.MeshStandardMaterial({ color: 0xf0c14a, roughness: 0.45, metalness: 0.35, emissive: 0x3a2a08 }));
+depotMesh.position.set(depot.x, heightAt(depot.x, depot.z) + 0.1, depot.z);
+depotMesh.receiveShadow = true;
 scene.add(depotMesh);
+const depotMast = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 8, 6), new THREE.MeshStandardMaterial({ color: 0xf0c14a, emissive: 0x5a3e10, emissiveIntensity: 0.35 }));
+depotMast.position.set(depot.x, heightAt(depot.x, depot.z) + 4, depot.z);
+depotMast.castShadow = true;
+scene.add(depotMast);
+const depotLamp = new THREE.PointLight(0xf0c14a, 3, 48);
+depotLamp.position.set(depot.x, heightAt(depot.x, depot.z) + 8, depot.z);
+scene.add(depotLamp);
+const cargoBox = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.32, 0.64), new THREE.MeshStandardMaterial({ color: 0xf0c14a, emissive: 0x3a2a08, roughness: 0.4 }));
+cargoBox.position.set(0, 0.88, -0.05);
+cargoBox.castShadow = true;
+lunaMesh.add(cargoBox);
 const probeMesh = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.4, 8), new THREE.MeshStandardMaterial({ color: 0xff6b8a, roughness: 0.4, metalness: 0.2 }));
-probeMesh.position.set(probe.x, heightAt(probe.x, probe.z) + 0.7, probe.z);
-probeMesh.visible = false;
+probeMesh.position.set(probe.x, heightAt(probe.x, probe.z) + 0.15, probe.z);
+probeMesh.rotation.z = 1.15;
 scene.add(probeMesh);
+const probeBeacon = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8), new THREE.MeshBasicMaterial({ color: 0xff6b8a }));
+probeBeacon.position.set(probe.x, heightAt(probe.x, probe.z) + 2.4, probe.z);
+scene.add(probeBeacon);
+const probeLamp = new THREE.PointLight(0xff6b8a, 0.8, 32);
+probeLamp.position.copy(probeBeacon.position);
+scene.add(probeLamp);
+const linkLine = new THREE.Line(
+  new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+  new THREE.LineBasicMaterial({ color: 0x2ee6d6, transparent: true, opacity: 0 })
+);
+scene.add(linkLine);
 {
   const arr = new Float32Array(560 * 3);
   for (let i = 0; i < 560; i++) {
@@ -615,9 +637,29 @@ function frame(t) {
   const dt = clamp((t - last) / 1000, 0, 0.05);
   last = t;
   step(dt);
-  probeMesh.visible = probeKnown || Math.hypot(active().x - probe.x, active().z - probe.z) < 18;
+  probeMesh.visible = true;
   placeMesh(lunaMesh, luna, activeName !== "LUNA");
   placeMesh(mareMesh, mare, activeName !== "MARE");
+  if (cargoDone && cargoBox.parent === lunaMesh) scene.attach(cargoBox);
+  if (cargoDone) {
+    cargoBox.position.set(depot.x, heightAt(depot.x, depot.z) + 0.42, depot.z);
+    depotLamp.intensity = 10;
+    depotMast.material.emissiveIntensity = 1.4;
+    depotMesh.material.emissive.setHex(0xf0c14a);
+  }
+  const blink = 0.55 + Math.sin(now * 4) * 0.45;
+  probeLamp.intensity = rescueDone ? 7 : blink * 1.4;
+  probeBeacon.material.color.setHex(rescueDone ? 0xb7fff2 : 0xff6b8a);
+  if (rescueDone) probeMesh.rotation.z = 0.15;
+  const linked = sees(luna, mare);
+  linkLine.material.opacity = linked ? (handshakeDone ? 0.95 : 0.28) : 0;
+  linkLine.geometry.setFromPoints([
+    new THREE.Vector3(lunaMesh.position.x, lunaMesh.position.y + 1.45, lunaMesh.position.z),
+    new THREE.Vector3(mareMesh.position.x, mareMesh.position.y + 1.45, mareMesh.position.z)
+  ]);
+  const dusk = 1 - clamp(timeLeft / 150, 0, 1);
+  sun.intensity = 4.3 * (1 - dusk * 0.7);
+  scene.fog.density = 0.016 + dusk * 0.022;
   const me = active();
   const y = heightAt(me.x, me.z);
   const k = 1 - Math.exp(-dt * 2.2);

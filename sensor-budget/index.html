@@ -269,6 +269,16 @@ const craters = world.craters;
 const minerals = world.minerals;
 const ices = world.ices;
 const hazards = world.hazards;
+{
+  const yaw0 = Math.atan2(-START.x, -START.z);
+  if (hills[0] && hills[0].mineral && minerals[0]) {
+    hills[0].x = START.x + Math.sin(yaw0) * 15;
+    hills[0].z = START.z + Math.cos(yaw0) * 15;
+    hills[0].amp = 2.25;
+    minerals[0].x = hills[0].x;
+    minerals[0].z = hills[0].z;
+  }
+}
 
 function heightAt(x, z) {
   let h = fbm(x * 0.075, z * 0.075) * 0.55;
@@ -460,6 +470,14 @@ function buildTerrain() {
     const n = (fbm(x * 0.9, z * 0.9) + 1) * 0.5;
     col.offsetHSL((n - 0.5) * 0.02, 0, (n - 0.5) * 0.14);
     if (h < -0.2) col.multiplyScalar(0.78);
+    for (const hill of hills) {
+      const d = Math.hypot(x - hill.x, z - hill.z);
+      if (d < hill.r * 0.85 && h > 0.6) col.lerp(new THREE.Color(0xb08968), 0.35);
+    }
+    for (const c of craters) {
+      const d = Math.hypot(x - c.x, z - c.z);
+      if (d < c.r * 0.62) col.lerp(new THREE.Color(0xd5e4ef), 0.5);
+    }
     colors[i * 3] = col.r;
     colors[i * 3 + 1] = col.g;
     colors[i * 3 + 2] = col.b;
@@ -540,6 +558,33 @@ const rings = [];
 let routeLine = null;
 const posts = [];
 
+const cargoBits = [];
+function syncCargo() {
+  const colors = [
+    ...minerals.filter((m) => m.got).map(() => 0xe39a4a),
+    ...ices.filter((m) => m.got).map(() => 0x9fd4ff)
+  ];
+  while (cargoBits.length < colors.length) {
+    const i = cargoBits.length;
+    const box = new THREE.Mesh(
+      new THREE.BoxGeometry(0.18, 0.14, 0.18),
+      new THREE.MeshStandardMaterial({ color: colors[i], roughness: 0.4, metalness: 0.2 })
+    );
+    box.position.set(-0.28 + (i % 3) * 0.22, 0.78, -0.12 - Math.floor(i / 3) * 0.22);
+    box.castShadow = true;
+    roverMesh.add(box);
+    cargoBits.push(box);
+  }
+}
+function stain(x, z, color) {
+  const m = new THREE.Mesh(
+    new THREE.CircleGeometry(3.2, 28),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide })
+  );
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(x, heightAt(x, z) + 0.08, z);
+  scene.add(m);
+}
 function plantFlag(x, z, color) {
   const group = new THREE.Group();
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.3, 6), new THREE.MeshStandardMaterial({ color: 0xdedede, metalness: 0.4, roughness: 0.4 }));
@@ -749,7 +794,9 @@ function addPing(x, z) {
   }
   pings.push({ x, z, mode, cells });
   budget -= 1;
-  addRing(x, z, mode === "mineral" ? 0xe39a4a : mode === "ice" ? 0x79c7ff : 0xff6b7a);
+  const pingColor = mode === "mineral" ? 0xe39a4a : mode === "ice" ? 0x79c7ff : 0xff6b7a;
+  addRing(x, z, pingColor);
+  stain(x, z, pingColor);
 }
 function addWaypoint(x, z) {
   const hit = wps.findIndex((w) => Math.hypot(w.x - x, w.z - z) < 2.2);
@@ -780,6 +827,7 @@ function checkPickups() {
     if (!m.got && Math.hypot(m.x - rover.x, m.z - rover.z) < 4.2) {
       m.got = true;
       plantFlag(m.x, m.z, 0xe39a4a);
+      syncCargo();
       say();
     }
   }
@@ -787,6 +835,7 @@ function checkPickups() {
     if (!ic.got && Math.hypot(ic.x - rover.x, ic.z - rover.z) < 4.2) {
       ic.got = true;
       plantFlag(ic.x, ic.z, 0x79c7ff);
+      syncCargo();
       say();
     }
   }
