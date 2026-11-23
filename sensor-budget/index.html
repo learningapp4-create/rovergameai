@@ -338,10 +338,18 @@ function canReach() {
   const kind = completion() >= 60 || minerals.filter((m) => m.got).length >= 4 ? "ice" : "mineral";
   return budget > 0 || hotPing(kind);
 }
+function cacheFull() {
+  return minerals.filter((m) => m.got).length >= 4 && ices.filter((m) => m.got).length >= 1;
+}
+function passIsUp() {
+  const b = $("banner");
+  return !!b && !b.hidden && b.textContent === "Pass";
+}
 function planAction() {
   const s = completion();
   const mg = minerals.filter((m) => m.got).length;
-  if (phase === "done" || s >= 90) return { label: "Retry", where: "button" };
+  const holdPass = cacheFull() && !iceGoal;
+  if (phase === "done" || (s >= 90 && !holdPass)) return { label: "Retry", where: "button" };
   if (phase === "drive") return { label: "Rolling", where: "button", disabled: true };
   if (wps.length) return { label: "Send rover", where: "button" };
   const kind = s >= 60 || mg >= 4 ? "ice" : "mineral";
@@ -356,8 +364,13 @@ function paintGoal() {
   const s = completion();
   const passHave = mg + Math.min(ig, 1);
   const full = mg >= 4 && ig >= 1;
-  if (!saw60 && full && s >= 60) { saw60 = true; flash("Pass", "pass"); }
-  if (!saw90 && s >= 90) { saw90 = true; flash("Strong", "great"); }
+  if (!iceGoal && full) {
+    if (!passIsUp()) flash("Pass", "pass");
+    saw60 = true;
+  } else if (!saw90 && iceGoal && s >= 90) {
+    saw90 = true;
+    flash("Strong", "great");
+  }
   if (!iceGoal) {
     $("goal").textContent = "Hills and ice";
     $("count").textContent = Math.min(passHave, 5) + "/5";
@@ -804,7 +817,7 @@ function addPing(x, z) {
   const pingColor = mode === "mineral" ? 0xe39a4a : mode === "ice" ? 0x79c7ff : 0xff6b7a;
   addRing(x, z, pingColor);
   stain(x, z, pingColor);
-  if (mode === "ice" && saw60) {
+  if (mode === "ice" && passIsUp()) {
     iceGoal = true;
     $("banner").hidden = true;
   }
@@ -883,7 +896,7 @@ function finish() {
   wpIndex = 0;
   rebuildRoute();
   const s = completion();
-  if (s >= 90) { phase = "done"; flash("Strong", "great"); return; }
+  if (s >= 90 && !(cacheFull() && !iceGoal)) { phase = "done"; flash("Strong", "great"); return; }
   if (s < 60 && !canReach()) {
     phase = "done";
     const mg = minerals.filter((m) => m.got).length;
