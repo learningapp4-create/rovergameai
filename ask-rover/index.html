@@ -322,6 +322,17 @@ function wantedKinds() {
 let saw60 = false, saw90 = false;
 let soilGoal = false;
 function mainAsk() { return kindCount("ice") >= 2 && kindCount("mineral") >= 2; }
+function soilOnScreen() {
+  return soilGoal && !(phase === "done" && kindCount("soil") < 2);
+}
+function goalComplete() {
+  return soilOnScreen() ? kindCount("soil") >= 2 : mainAsk();
+}
+function badgeWord() {
+  if (!goalComplete()) return "";
+  if (soilOnScreen() && score >= 90) return "Strong";
+  return "Pass";
+}
 function flash(text, cls) {
   const b = $("flash");
   if (!b) return;
@@ -331,9 +342,18 @@ function flash(text, cls) {
 }
 function paintGoal() {
   const ice = kindCount("ice"), mineral = kindCount("mineral"), soil = kindCount("soil");
-  if (!saw60 && mainAsk()) { saw60 = true; flash("Pass", "pass"); }
-  if (!saw90 && mainAsk() && score >= 90) { saw90 = true; flash("Strong", "great"); }
-  if (!soilGoal) {
+  const word = badgeWord();
+  const badge = $("flash");
+  if (!word) {
+    if (badge && !badge.hidden && (badge.textContent === "Pass" || badge.textContent === "Strong")) badge.hidden = true;
+  } else if (word === "Strong") {
+    if (!saw90) { saw90 = true; flash("Strong", "great"); }
+    else if (badge.hidden || badge.textContent !== "Strong") flash("Strong", "great");
+  } else if (badge.hidden || badge.textContent !== "Pass") {
+    saw60 = true;
+    flash("Pass", "pass");
+  }
+  if (!soilOnScreen()) {
     $("goal").textContent = "Ice and veins";
     $("count").textContent = (Math.min(ice, 2) + Math.min(mineral, 2)) + "/4";
   } else {
@@ -345,8 +365,8 @@ function paintScore() {
   clampScore();
   $("pct").textContent = score + "%";
   $("fill").style.width = score + "%";
-  const met = mainAsk();
-  $("meter").className = "meter" + (!met ? "" : score >= 90 ? " great" : score >= 60 ? " pass" : "");
+  const word = badgeWord();
+  $("meter").className = "meter" + (word === "Strong" ? " great" : word === "Pass" ? " pass" : "");
   $("tag").textContent = "ROVER CAM · TURN " + Math.min(turn, TURNS) + " / " + TURNS;
   paintGoal();
 }
@@ -452,9 +472,9 @@ function missLine() {
 function renderDone() {
   phase = "done";
   clampScore();
-  const met = mainAsk();
-  const cls = !met ? "fail" : score >= 90 ? "great" : "pass";
-  const title = !met ? missLine() : score >= 90 ? "Strong" : "Pass";
+  const word = badgeWord();
+  const cls = word === "Strong" ? "great" : word === "Pass" ? "pass" : "fail";
+  const title = word || missLine();
   $("card").innerHTML = `<h2 class="${cls}">${title}</h2><button id="restart2">Retry</button>`;
   bind("restart2", () => location.reload());
   paintScore();
